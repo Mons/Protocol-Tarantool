@@ -1,0 +1,6 @@
+Revision history for Perl extension Protocol::Tarantool.
+
+0.01  Fri Oct 12 13:00:13 2012
+	- original version; created by h2xs 1.23 with options
+		-n Protocol::Tarantool -A
+
