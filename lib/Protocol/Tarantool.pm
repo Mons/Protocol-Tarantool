@@ -8,7 +8,7 @@ use base qw(Exporter);
 
 
 our %EXPORT_TAGS = (
-    client      => [ qw( tarantool async_tarantool coro_tarantool) ],
+    client      => [ qw( ) ],
     constant    => [
         qw(
             TNT_INSERT TNT_SELECT TNT_UPDATE TNT_DELETE TNT_CALL TNT_PING

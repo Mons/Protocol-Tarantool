@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
+#include <assert.h>
 
 #include <connector/c/include/tarantool/tnt_mem.h>
 #include <connector/c/include/tarantool/tnt_proto.h>
@@ -94,10 +96,13 @@ tnt_select(struct tnt_stream *s,
 	v[1].iov_len  = sizeof(struct tnt_header_select);
 	v[2].iov_base = &keys->count;
 	v[2].iov_len  = 4;
+	//fprintf(stderr, "put into iovec[2]: tuple data=%d\n",keys->count );
 	int vi = 3;
 	tnt_rewind(&i);
 	while (tnt_next(&i)) {
 		struct tnt_tuple *t = TNT_ILIST_TUPLE(&i);
+		//fprintf(stderr, "put into iovec[%d]: tuple data %p of size %d\n",vi,t->data,t->size );
+		assert(t->data);
 		v[vi].iov_base = t->data;
 		v[vi].iov_len  = t->size;
 		vi++;

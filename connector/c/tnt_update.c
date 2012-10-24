@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
+#include <assert.h>
 
 #include <connector/c/include/tarantool/tnt_mem.h>
 #include <connector/c/include/tarantool/tnt_proto.h>
@@ -252,11 +254,13 @@ tnt_update(struct tnt_stream *s, uint32_t ns, uint32_t flags,
 	v[0].iov_len  = sizeof(struct tnt_header);
 	v[1].iov_base = &hdr_update;
 	v[1].iov_len  = sizeof(struct tnt_header_update);
+	//fprintf(stderr, "saving cardinalidy %d of size (%d)", *(int *)k->data,k->size);
 	v[2].iov_base = k->data;
 	v[2].iov_len  = k->size;
 	v[3].iov_base = &ops->wrcnt;
 	v[3].iov_len  = 4;
 	v[4].iov_base = TNT_SBUF_DATA(ops);
 	v[4].iov_len  = TNT_SBUF_SIZE(ops);
+	//assert(0);
 	return s->writev(s, v, 5);
 }

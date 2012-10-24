@@ -1,5 +1,20 @@
 #!/usr/bin/perl
 
+{
+	package # hide
+		MyBuilder;
+	
+	sub _print {
+		$_[1] =~ s{^(.+?)(#.+?|)(?:\n|\z)}{\e[$_[0]{__color};1m$1\e[35m$2\e[0m}s;
+		goto &{ $_[0]->can('SUPER::_print') };
+	}
+	
+	sub ok {
+		$_[0]{__color} = $_[1] ? 32 : $_[0]->in_todo ? 33 : 31;
+		goto &{ $_[0]->can('SUPER::ok') };
+	}
+}
+
 use warnings;
 use strict;
 use utf8;
@@ -9,7 +24,27 @@ use lib qw(blib/lib blib/arch ../blib/lib ../blib/arch);
 
 use Test::More tests    => 151;
 use Encode qw(decode encode);
+use Devel::Hexdump 'xd';
 
+BEGIN {
+	if (-t STDOUT) {
+	my $b = Test::More->builder;
+	@MyBuilder::ISA = ( ref $b );
+	bless $b, 'MyBuilder';
+	warn Test::More->builder;
+	}
+}
+
+=for rem
+pass 'x1';
+fail 'x2';
+{
+	local $TODO = "Testing";
+	pass 'x3';
+	fail 'x4';
+}
+__END__
+=cut
 
 BEGIN {
     my $builder = Test::More->builder;
@@ -73,6 +108,8 @@ is $a[2], 12, 'request id';
 is $a[3], 13, 'space no';
 is $a[4], 14, 'flags';
 is $a[5], 4,  'tuple size';
+#diag xd $sbody;
+#__END__
 
 # delete
 $sbody = Protocol::Tarantool::delete( 119, 120, 121, [ 122, 123 ] );
@@ -104,8 +141,9 @@ is $a[4], 'tproc',  'proc name';
 is $a[5], 2, 'tuple size';
 
 # update
-my @ops = map { [ int rand 100, $_, int rand 100 ] }
-    qw(add and or xor set delete insert);
+diag "Testing update";
+my @ops = map { [ int rand 100, $_, int rand 100, 'I' ] }
+    qw(+ & | ^ = !),'#';
 $sbody = Protocol::Tarantool::update( 15, 16, 17, [ 18 ], \@ops);
 ok defined $sbody, '* update body';
 @a = unpack "( L$LE )*", $sbody;
@@ -116,7 +154,10 @@ is $a[3], 16, 'space no';
 is $a[4], 17, 'flags';
 is $a[5], 1,  'tuple size';
 
+diag xd $sbody;
 
+#__END__
+diag "Testing lua";
 $sbody = Protocol::Tarantool::lua( 124, 125, 'tproc', [  ]);
 
 # parser
@@ -159,7 +200,8 @@ for my $bin (@bins) {
     ok open(my $fh, '<:raw', $bin), "open $bin";
     my $pkt;
     { local $/; $pkt = <$fh>; }
-    ok $pkt, 'response body was read';
+    ok $pkt, "response body was read from $bin";
+    diag xd $pkt;
 
     my $res = Protocol::Tarantool::response( $pkt );
     diag explain $res;

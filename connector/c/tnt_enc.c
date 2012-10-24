@@ -71,7 +71,7 @@ tnt_enc_read(const char *buf, uint32_t *value)
 	return -1;
 }
 
-void
+char *
 tnt_enc_write(char *buf, uint32_t value)
 {
 	if (value >= (1 << 7)) {
@@ -86,6 +86,7 @@ tnt_enc_write(char *buf, uint32_t value)
 		*(buf++) = ((value >> 7) | 0x80);
 	}
 	*(buf++) = ((value) & 0x7F);
+	return buf;
 }
 
 int
