@@ -1,0 +1,13 @@
+{
+  len => 21,
+  trash => "",
+  flags => 5,
+  tuple => [
+    "6:s",
+    "7:s",
+    "test:s"
+  ],
+  id => 3,
+  type => 21,
+  space => 4
+}

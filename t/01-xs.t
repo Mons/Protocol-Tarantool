@@ -31,7 +31,6 @@ BEGIN {
 	my $b = Test::More->builder;
 	@MyBuilder::ISA = ( ref $b );
 	bless $b, 'MyBuilder';
-	warn Test::More->builder;
 	}
 }
 
@@ -74,31 +73,34 @@ my $LE = $] > 5.01 ? '<' : '';
 
 
 # SELECT
+diag "Testing select";
 my $sbody = Protocol::Tarantool::select( 9, 8, 7, 6, 5, [ [4], [3] ] );
 ok defined $sbody, '* select body';
 
 my @a = unpack "( L$LE )*", $sbody;
 is $a[0], TNT_SELECT, 'select type';
-is $a[1], length($sbody) - 3 * 4, 'body length';
-is $a[2], 9, 'request id';
-is $a[3], 8, 'space no';
-is $a[4], 7, 'index no';
-is $a[5], 6, 'offset';
-is $a[6], 5, 'limit';
-is $a[7], 2, 'tuple count';
-ok !eval { Protocol::Tarantool::select( 1, 2, 3, 4, 5, [ 6 ] ) }, 'keys format';
-like $@ => qr{ARRAYREF of ARRAYREF}, 'error string';
+is $a[1], length($sbody) - 3 * 4, 'select - body length';
+is $a[2], 9, 'select - request id';
+is $a[3], 8, 'select - space no';
+is $a[4], 7, 'select - index no';
+is $a[5], 6, 'select - offset';
+is $a[6], 5, 'select - limit';
+is $a[7], 2, 'select - tuple count';
+ok !eval { Protocol::Tarantool::select( 1, 2, 3, 4, 5, [ 6 ] ) }, 'select - keys format';
+like $@ => qr{ARRAYREF of ARRAYREF}, 'select - error string';
 
 # PING
+diag "Testing ping";
 $sbody = Protocol::Tarantool::ping( 11 );
 ok defined $sbody, '* ping body';
 @a = unpack "( L$LE )*", $sbody;
 is $a[0], TNT_PING, 'ping type';
-is $a[1], length($sbody) - 3 * 4, 'body length';
-is $a[2], 11, 'request id';
+is $a[1], length($sbody) - 3 * 4, 'ping - body length';
+is $a[2], 11, 'ping - request id';
 
 
 # insert
+diag "Testing insert";
 $sbody = Protocol::Tarantool::insert( 12, 13, 14, [ 'a', 'b', 'c', 'd' ]);
 ok defined $sbody, '* insert body';
 @a = unpack "( L$LE )*", $sbody;
@@ -144,24 +146,33 @@ is $a[5], 2, 'tuple size';
 diag "Testing update";
 my @ops = map { [ int rand 100, $_, int rand 100, 'I' ] }
     qw(+ & | ^ = !),'#';
+push @ops, [ int(rand 100), ':', int(rand 100), int(rand 100), "somestring"  ];
+
 $sbody = Protocol::Tarantool::update( 15, 16, 17, [ 18 ], \@ops);
 ok defined $sbody, '* update body';
 @a = unpack "( L$LE )*", $sbody;
 is $a[0], TNT_UPDATE, 'update type';
-is $a[1], length($sbody) - 3 * 4, 'body length';
-is $a[2], 15, 'request id';
-is $a[3], 16, 'space no';
-is $a[4], 17, 'flags';
-is $a[5], 1,  'tuple size';
+is $a[1], length($sbody) - 3 * 4, 'update - body length';
+is $a[2], 15, 'update - request id';
+is $a[3], 16, 'update - space no';
+is $a[4], 17, 'update - flags';
+is $a[5], 1,  'update - tuple size';
 
-diag xd $sbody;
+my %pk; my $raw = $sbody;
+( @pk{ qw(type len id) }, $raw) = unpack 'V3 a*', $raw;
+if ($pk{type} == TNT_UPDATE) {
+	( @pk{ qw( space flags tuple ) }, $raw) = unpack 'V2 V a*', $raw;
+	#@{ $pk->{tuple} = [  ]
+}
 
-#__END__
 diag "Testing lua";
 $sbody = Protocol::Tarantool::lua( 124, 125, 'tproc', [  ]);
 
 # parser
+{
+local $SIG{__WARN__} = sub {};
 ok !eval { Protocol::Tarantool::response( undef ) }, '* parser: undef';
+}
 my $res = Protocol::Tarantool::response( '' );
 diag explain $res;
 isa_ok $res => 'HASH', 'empty input';
@@ -174,12 +185,12 @@ for (TNT_INSERT, TNT_UPDATE, TNT_SELECT, TNT_DELETE, TNT_CALL, TNT_PING) {
     $data = pack "L$LE L$LE L$LE L$LE Z*",
         $_, 5 + length $msg, $_ + 100, 0x0101, $msg;
     $res = Protocol::Tarantool::response( $data );
-    diag explain $res;
+    #diag explain $res;
     isa_ok $res => 'HASH', 'well input ' . $_;
     is $res->{id}, $_ + 100, 'request id';
-    is $res->{op}, $_, 'request type';
+    is $res->{type}, $_, 'request type';
 
-    unless($res->{op} == TNT_PING) {
+    unless($res->{type} == TNT_PING) {
         is $res->{status}, 'error', "status $_";
         is $res->{code}, 0x101, 'code';
         is $res->{errstr}, $msg, 'errstr';
@@ -201,16 +212,18 @@ for my $bin (@bins) {
     my $pkt;
     { local $/; $pkt = <$fh>; }
     ok $pkt, "response body was read from $bin";
-    diag xd $pkt;
+    #diag xd $pkt;
 
     my $res = Protocol::Tarantool::response( $pkt );
-    diag explain $res;
+    #diag explain $res;
     SKIP: {
         skip 'legacy delete packet', 4 if $type == 20 and TNT_DELETE != 20;
-        is $res->{status}, $status, 'status';
-        is $res->{op}, $type, 'status';
-        is $res->{code}, $err, 'error code';
-        ok ( !($res->{code} xor $res->{errstr}), 'errstr' );
+        my $ok = 1;
+        $ok &&= is $res->{status}, $status, $bin.' - status';
+        $ok &&= is $res->{type}, $type, $bin.' - type';
+        $ok &&= is $res->{code}, $err, $bin.' - error code';
+        $ok &&= ok ( !($res->{code} xor $res->{errstr}), 'errstr' );
+        $ok or diag explain $res;
     }
 }
 

@@ -1,0 +1,16 @@
+{
+	count => 3,
+	id => 3,
+	index => 5,
+	len => 41,
+	limit => 7,
+	offset => 6,
+	space => 4,
+	trash => "",
+	type => 17,
+	tuples => [
+		["8:s"],
+		["9:s"],
+		["test:s"],
+	],
+}

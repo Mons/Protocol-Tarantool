@@ -1,0 +1,13 @@
+{
+  len => 23,
+  trash => "",
+  proc => "call1",
+  flags => 4,
+  tuple => [
+    "5:s",
+    "6:s",
+    "test:s"
+  ],
+  id => 3,
+  type => 22
+}

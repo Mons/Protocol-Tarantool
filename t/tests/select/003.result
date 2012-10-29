@@ -1,0 +1,16 @@
+{
+	count => 3,
+	id => 257,
+	index => 259,
+	len => 45,
+	limit => 261,
+	offset => 260,
+	space => 258,
+	trash => "",
+	type => 17,
+	tuples => [
+		["262:s"],
+		["263:s"],
+		["test:s"],
+	],
+}

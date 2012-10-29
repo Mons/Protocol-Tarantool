@@ -4,8 +4,32 @@
 
 #include "ppport.h"
 
-#include <tarantool/tnt.h>
 #include <string.h>
+
+#define TNT_OP_INSERT      13
+#define TNT_OP_SELECT      17
+#define TNT_OP_UPDATE      19
+#define TNT_OP_DELETE      21
+#define TNT_OP_CALL        22
+#define TNT_OP_PING        65280
+
+#define TNT_FLAG_RETURN    0x01
+#define TNT_FLAG_ADD       0x02
+#define TNT_FLAG_REPLACE   0x04
+#define TNT_FLAG_BOX_QUIET 0x08
+#define TNT_FLAG_NOT_STORE 0x10
+
+enum {
+	TNT_UPDATE_ASSIGN = 0,
+	TNT_UPDATE_ADD,
+	TNT_UPDATE_AND,
+	TNT_UPDATE_XOR,
+	TNT_UPDATE_OR,
+	TNT_UPDATE_SPLICE,
+	TNT_UPDATE_DELETE,
+	TNT_UPDATE_INSERT,
+};
+
 
 #ifdef HAS_QUAD
 #ifndef I64
@@ -18,22 +42,68 @@ typedef U64TYPE U64;
 
 #ifdef HAS_QUAD
 #define HAS_LL 1
-#define dUINTtypes \
-	U64 int64;\
-	U32 int32;\
-	U16 int16;\
-	U8  int8
 #else
 #define HAS_LL 0
-#define dUINTtypes \
-	unsigned long long int64 \
-	U32 int32;\
-	U16 int16;\
-	U8  int8
 #endif
 
-//#define DEBUG_OVERALLOC
-#undef DEBUG_OVERALLOC
+
+
+typedef struct {
+	uint32_t type;
+	uint32_t len;
+	uint32_t reqid;
+} tnt_hdr_t;
+
+typedef struct {
+	uint32_t type;
+	uint32_t len;
+	uint32_t reqid;
+	uint32_t code;
+} tnt_res_t;
+
+typedef struct {
+	uint32_t ns;
+	uint32_t flags;
+} tnt_hdr_nsf_t;
+
+typedef struct {
+	uint32_t type;
+	uint32_t len;
+	uint32_t reqid;
+	uint32_t space;
+	uint32_t flags;
+} tnt_pkt_insert_t;
+
+typedef tnt_pkt_insert_t tnt_pkt_delete_t;
+typedef tnt_pkt_insert_t tnt_pkt_update_t;
+
+typedef struct {
+	uint32_t type;
+	uint32_t len;
+	uint32_t reqid;
+	uint32_t space;
+	uint32_t index;
+	uint32_t offset;
+	uint32_t limit;
+	uint32_t count;
+} tnt_pkt_select_t;
+
+
+typedef struct {
+	uint32_t type;
+	uint32_t len;
+	uint32_t reqid;
+	uint32_t flags;
+} tnt_pkt_call_t;
+
+
+typedef
+	union {
+		char     *c;
+		U32      *i;
+		U64      *q;
+		U16      *s;
+	} uniptr;
 
 unsigned char allowed_format[256] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
@@ -56,383 +126,11 @@ unsigned char allowed_format[256] = {
 
 
 typedef struct {
+	char    def;
 	char   *f;
 	size_t size;
 } unpack_format;
 
-typedef struct {
-	struct tnt_stream s;
-	struct tnt_stream_buf b;
-	SV * sv;
-	uint32_t cardinality;
-} sv_buffer;
-
-#define call_func_with_format(func, format, sv, ... )      \
-	STMT_START {                                           \
-		dUINTtypes;                                        \
-		STRLEN __my_size;                                  \
-		char  *__my_data;                                  \
-		switch( format ) {                                 \
-			case 'l':                                      \
-				int64 = (U64) SvIV( sv );                  \
-				func( __VA_ARGS__, (char * ) &int64, sizeof( U64 ) );        \
-				break;                                     \
-			case 'L':                                      \
-				int64 = (U64) SvUV( sv );                  \
-				func( __VA_ARGS__, (char * ) &int64, sizeof( U64 ) );        \
-				break;                                     \
-			case 'i':                                      \
-				int32 = (U32) SvIV( sv );                  \
-				func( __VA_ARGS__, (char * ) &int32, sizeof( U32 ) );        \
-				break;                                     \
-			case 'I':                                      \
-				int32 = (U32) SvUV( sv );                  \
-				func( __VA_ARGS__, (char * ) &int32, sizeof( U32 ) );        \
-				break;                                     \
-			case 's':                                      \
-				int16 = (U16) SvIV( sv );                  \
-				func( __VA_ARGS__, (char * ) &int16, sizeof( U16 ) );        \
-				break;                                     \
-			case 'S':                                      \
-				int16 = (U16) SvUV( sv );                  \
-				func( __VA_ARGS__, (char * ) &int16, sizeof( U16 ) );        \
-				break;                                     \
-			case 'c':                                      \
-				int8 = (U8) SvIV( sv );                    \
-				func( __VA_ARGS__, (char * ) &int8, sizeof( U8 ) );          \
-				break;                                     \
-			case 'C':                                      \
-				int8 = (U8) SvUV( sv );                    \
-				func( __VA_ARGS__, (char * ) &int8, sizeof( U8 ) );          \
-				break;                                     \
-			case 'p':                                      \
-			case 'u':                                      \
-				__my_data = SvPVbyte( (sv), __my_size );   \
-				func( __VA_ARGS__, __my_data, __my_size ); \
-				break;                                     \
-			default:                                       \
-				func( __VA_ARGS__, "", 0 );                \
-				croak("Unsupported format: %s",format);    \
-		}                                                  \
-	} STMT_END
-	
-
-static void
-tmake_tuple_pack( struct tnt_tuple *r, AV *t, unpack_format * format ) {
-	int i;
-	//struct tnt_tuple *r = tnt_mem_alloc( sizeof( struct tnt_tuple ) );
-	//if ( !r ) croak("Can not allocate memory");
-	tnt_tuple_init( r );
-	
-	dUINTtypes;
-	char *data, *ptr, *end;
-	// Every field needs enc of size. Max size of enc is 5 bytes. And reserve something for data. For ex 59 bytes up to 64
-	if (av_len(t) == -1) return;
-#ifdef DEBUG_OVERALLOC
-	int mprof =
-#endif
-	r->size = ( av_len(t) + 1 ) * ( 64 );
-	//warn ("r->size=%d", r->size);
-	
-	SV *buf = sv_2mortal( newSV( 4 + r->size  ) );
-	sv_setpvn( buf, "\0\0\0\0", 4 ); // default cardinality to shift sv pos
-	
-	for (i = 0; i <= av_len( t ); i++) {
-		STRLEN size;
-		SV **val = av_fetch( t, i, 0 );
-		if (!val || !SvOK(*val)) {
-			data = "";
-			size = 0;
-			//tnt_tuple_add( r, "", 0 );
-		} else {
-			if (format && i < format->size) {
-					switch( format->f[ i ] ) {
-#ifdef HAS_QUAD
-						case 'l':
-							int64 = (U64) SvIV( *val );
-							data = (char *) &int64;
-							size = sizeof( U64 );
-							//tnt_tuple_add( r, &int64, sizeof( U64 ) );
-							break;
-						case 'L':
-							int64 = (U64) SvUV( *val );
-							data = (char *) &int64;
-							size = sizeof( U64 );
-							//tnt_tuple_add( r, &int64, sizeof( U64 ) );
-							break;
-#endif
-						case 'i':
-							int32 = (U32) SvIV( *val );
-							data = (char *) &int32;
-							size = sizeof( U32 );
-							//tnt_tuple_add( r, &int32, sizeof( U32 ) );
-							break;
-						case 'I':
-							int32 = (U32) SvUV( *val );
-							data = (char *) &int32;
-							size = sizeof( U32 );
-							//tnt_tuple_add( r, &int32, sizeof( U32 ) );
-							break;
-						case 's':
-							int16 = (U16) SvIV( *val );
-							data = (char *) &int16;
-							size = sizeof( U16 );
-							//tnt_tuple_add( r, &int16, sizeof( U16 ) );
-							break;
-						case 'S':
-							int16 = (U16) SvUV( *val );
-							data = (char *) &int16;
-							size = sizeof( U16 );
-							//tnt_tuple_add( r, &int16, sizeof( U16 ) );
-							break;
-						case 'c':
-							int8 = (U8) SvIV( *val );
-							data = (char *) &int8;
-							size = sizeof( U8 );
-							//tnt_tuple_add( r, &int8, sizeof( U8 ) );
-							break;
-						case 'C':
-							int8 = (U8) SvUV( *val );
-							data = (char *) &int8;
-							size = sizeof( U8 );
-							//tnt_tuple_add( r, &int8, sizeof( U8 ) );
-							break;
-						case 'p':
-						case 'u':
-							//SvUTF8_off(*val);
-							//data = SvPVbytex( *val, size );
-							data = SvPV( *val, size );
-							break;
-						default:
-							croak("Unsupported format: %s",format->f[ i ]);
-					}
-			} else { // no format
-				//SvUTF8_off(*val);
-				//data = SvPVbyte( *val, size );
-				data = SvPV( *val, size );
-				//tnt_tuple_add( r, data, size );
-			}
-		}
-		
-		///Replacing...
-		//tnt_tuple_add( r, data, size );
-		
-		r->cardinality++;
-		//warn("Call grow on sv %p (%p). cur=%d, new=%d", buf, SvPV_nolen(buf), SvCUR(buf),SvCUR(buf) + size + 5);
-		r->size = SvCUR(buf) + size + 5;
-		ptr = SvGROW( buf, r->size ); // 5 is for enc
-		//warn("Grown: ptr=%p", ptr);
-		ptr += SvCUR(buf);
-		
-		//warn("Seeked: ptr=%p", ptr);
-		end = tnt_enc_write(ptr, size);
-		//warn ("End=%p, Enc=%d", end, end - ptr);
-		SvCUR_set(buf, SvCUR(buf) + ( end - ptr ));
-		//warn("catpvn: %p of size %d", data,size);
-		sv_catpvn( buf, data, size );
-	}
-	
-	* ( (U32 *) SvPV_nolen( buf ) ) = htole32( r->cardinality );
-	r->data = SvPV(buf, r->size);
-	//warn("generated tuple {%d}, size=%d (svcur=%d)\n", r->cardinality, r->size, SvCUR(buf));
-#ifdef DEBUG_OVERALLOC
-	warn("Memory overallocate=%d", mprof - r->size);
-#endif
-	return;
-	//return r;
-}
-
-
-static ssize_t sv_writev(struct tnt_stream *s, struct iovec *iov, int count) {
-	sv_buffer * buf = (sv_buffer *) s;
-	STRLEN size = SvCUR( buf->sv );
-	int i;
-	for (i = 0 ; i < count ; i++) size += iov[i].iov_len;
-	//warn("Called sv_writev(%p). Growing to size=%d", buf->sv, size);
-	SvGROW( buf->sv, size );
-	for (i = 0 ; i < count ; i++) {
-		//warn ("catpvn[%d] p=%p of size %d into SV %p", i, iov[i].iov_base, iov[i].iov_len, buf->sv);
-		assert(iov[i].iov_base);
-		sv_catpvn( buf->sv, iov[i].iov_base, iov[i].iov_len );
-	}
-	s->wrcnt++;
-	
-	return size;
-}
-
-/*
-static struct tnt_stream * tmake_buf() {
-	sv_buffer * buf = safemalloc( sizeof( sv_buffer ) );
-	memset(buf,0,sizeof(sv_buffer));
-	if (!buf) croak("OOM!");
-	//buf->sv = newSVpvn( "",0 ); // minimal packet size
-	buf->sv = newSV( 12 ); // minimal packet size
-	warn("Created sv: %p (%p)", buf, buf->sv);
-	buf->s.writev = sv_writev;
-	return &buf->s;
-}
-*/
-
-
-static void oplist( struct tnt_stream *b, AV *ops ) {
-	int i;
-	//struct tnt_stream *b = tmake_buf();
-	for (i = 0; i <= av_len( ops ); i++) {
-		SV **val = av_fetch( ops, i, 0 );
-		if (!*val || !SvROK( *val ) || SvTYPE( SvRV(*val) ) != SVt_PVAV )
-			croak("Wrong update operation format: %s", val ? SvPV_nolen(*val) : "undef");
-		
-		AV *aop = (AV *)SvRV(*val);
-		
-		if ( av_len( aop ) < 1 ) croak("Too short operation argument list");
-		
-		U32 fno = SvUV( *av_fetch( aop, 0, 0 ) );
-		char *opname = SvPV_nolen( *av_fetch( aop, 1, 0 ) );
-		
-		STRLEN size;
-		U8     opcode = 0;
-		
-		switch (*opname) {
-			case '#': //delete
-				tnt_update_delete( b, fno );
-				break;
-			case '=': //set
-				if ( av_len( aop ) < 3 ) croak("Too short operation argument list for %c. Need 3, have %d", *opname, av_len( aop ) );
-				//char *data   = SvPV( *av_fetch( aop, 2, 0 ), size );
-				
-				call_func_with_format(tnt_update_assign, *SvPV_nolen( *av_fetch( aop, 3, 0 ) ), *av_fetch( aop, 2, 0 ), b, fno);
-				//tnt_update_assign( b, fno, data, size );
-				break;
-			case '!': //insert
-				if ( av_len( aop ) < 3 ) croak("Too short operation argument list for %c", *opname);
-				call_func_with_format(tnt_update_insert, *SvPV_nolen( *av_fetch( aop, 3, 0 ) ), *av_fetch( aop, 2, 0 ), b, fno);
-				break;
-			case ':': //splice
-				if ( av_len( aop ) < 3 ) croak("Too short operation argument list for %c", *opname);
-				U32 offset = SvUV( *av_fetch( aop, 2, 0 ) );
-				U32 length = SvUV( *av_fetch( aop, 3, 0 ) );
-				char * data;
-				if ( av_len( aop ) > 3 && SvOK( *av_fetch( aop, 4, 0 ) ) ) {
-					data = SvPV( *av_fetch( aop, 4, 0 ), size );
-				} else {
-					data = "";
-					size = 0;
-				}
-				tnt_update_splice( b, fno, offset, length, data, size );
-				break;
-			case '+': //add
-				opcode = TNT_UPDATE_ADD;
-				break;
-			/* Bullshit. Client misses -
-			case '-': //subtract
-				opcode = TNT_UPDATE_ADD;
-				break;
-			*/
-			case '&': //and
-				opcode = TNT_UPDATE_AND;
-				break;
-			case '|': //or
-				opcode = TNT_UPDATE_OR;
-				break;
-			case '^': //xor
-				opcode = TNT_UPDATE_XOR;
-				break;
-			default:
-				croak("Unknown operation: %c", *opname);
-		}
-		if (opcode) { // Arith ops
-			if ( av_len( aop ) < 2 ) croak("Too short operation argument list for %c", *opname);
-			unsigned long long v = SvUV( *av_fetch( aop, 2, 0 ) );
-			tnt_update_arith( b, fno, opcode, v );
-		}
-	}
-	//return b;
-}
-
-static AV * extract_tuples(struct tnt_reply *r, unpack_format * format, char default_string) {
-	struct tnt_iter it;
-	tnt_iter_list(&it, TNT_REPLY_LIST(r));
-	AV *res = newAV();
-	sv_2mortal((SV *)res);
-
-	while (tnt_next(&it)) {
-		struct tnt_iter ifl;
-		struct tnt_tuple *tu = TNT_ILIST_TUPLE(&it);
-		tnt_iter(&ifl, tu);
-		AV *t = newAV();
-		int idx = 0;
-		while (tnt_next(&ifl)) {
-			char    *data = TNT_IFIELD_DATA(&ifl);
-			uint32_t size = TNT_IFIELD_SIZE(&ifl);
-			if (format && idx < format->size) {
-					switch( format->f[ idx ] ) {
-#ifdef HAS_QUAD
-						case 'l':
-							if (size != 8) warn("Field l should be of size 8, but got: %d", size);
-							av_push( t, newSViv( le64toh( *( I64 *) data ) ) );
-							break;
-						case 'L':
-							if (size != 8) warn("Field L should be of size 8, but got: %d", size);
-							av_push( t, newSVuv( le64toh( *( U64 *) data ) ) );
-							break;
-#endif
-						case 'i':
-							if (size != 4) warn("Field i should be of size 4, but got: %d", size);
-							av_push( t, newSViv( le32toh( *( I32 *) data ) ) );
-							break;
-						case 'I':
-							if (size != 4) warn("Field I should be of size 4, but got: %d", size);
-							//warn( "I32: %lu (%02x %02x %02x %02x)", * ( I32 * ) data, *data, *(data+1), 0,0 );
-							av_push( t, newSVuv( le32toh( *( U32 *) data ) ) );
-							break;
-						case 's':
-							if (size != 2) warn("Field s should be of size 2, but got: %d", size);
-							av_push( t, newSViv( le16toh( *( I16 *) data ) ) );
-							break;
-						case 'S':
-							if (size != 2) warn("Field S should be of size 2, but got: %d", size);
-							av_push( t, newSVuv( le16toh( *( U16 *) data ) ) );
-							break;
-						case 'c':
-							if (size != 1) warn("Field c should be of size 1, but got: %d", size);
-							av_push( t, newSViv( *( I8 *) data ) );
-							break;
-						case 'C':
-							if (size != 1) warn("Field C should be of size 1, but got: %d", size);
-							av_push( t, newSVuv( *( U8 *) data ) );
-							break;
-						case 'p':
-							av_push(t, newSVpvn_utf8(data, size, 0));
-							break;
-						case 'u':
-							av_push(t, newSVpvn_utf8(data, size, 1));
-							break;
-						default:
-							croak("Unsupported format: %s",format->f[ idx ]);
-					}
-			} else { // no format
-				if (default_string == 'u') {
-					av_push(t, newSVpvn_utf8(data, size, 1));
-				} else {
-					av_push(t, newSVpvn_utf8(data, size, 0));
-				}
-			}
-			idx++;
-		}
-		av_push(res, newRV_noinc((SV *) t));
-	}
-	return res;
-}
-
-#define SV_BUFFER(var, size, id) \
-	STMT_START { \
-		memset(&var,0,sizeof(sv_buffer)); \
-		var.sv = newSV( size ); \
-		sv_setpvn( var.sv, "", 0 ); \
-		var.s.writev = sv_writev; \
-		var.s.reqid = id; \
-		var.s.data = &var.b; \
-	} STMT_END
 
 #define CHECK_PACK_FORMAT(src) \
 	STMT_START { \
@@ -452,6 +150,331 @@ static AV * extract_tuples(struct tnt_reply *r, unpack_format * format, char def
 				} \
 	} STMT_END
 
+#define dUnpackFormat(fvar) unpack_format fvar; fvar.f = ""; fvar.size = 0; fvar.def  = 'p'
+
+#define dExtractFormat(fvar,pos,usage) STMT_START {                  \
+		if (items > pos) {                                           \
+			if ( SvOK(ST(pos)) && SvPOK(ST(pos)) ) {                 \
+				fvar.f = SvPVbyte(ST(pos), fvar.size);               \
+				CHECK_PACK_FORMAT( fvar.f );                         \
+			}                                                        \
+			else if (!SvOK( ST(pos) )) {}                            \
+			else {                                                   \
+				croak("Usage: " usage " [ ,format_string [, default_unpack ] ] )");   \
+			}                                                        \
+			if ( items > pos + 1 && SvPOK(ST( pos + 1 )) ) {         \
+				STRLEN _l;                                           \
+				char * _p = SvPV( ST( pos + 1 ), _l );               \
+				if (_l == 1 && ( *_p == 'p' || *_p == 'u' )) {       \
+					format.def = *_p;                                \
+				} else {                                             \
+					croak("Bad default: %s; Usage: " usage " [ ,format_string [, default_unpack ] ] )", _p);   \
+				}                                                    \
+			}                                                        \
+			                                                         \
+		}                                                            \
+	} STMT_END
+
+
+
+
+
+#define uptr_cat_sv_fmt( up, src, format )                                 \
+	STMT_START {                                                           \
+		switch( format ) {                                                 \
+			case 'l': *( up.q ++ ) = htole64( (U64) SvIV( src ) ); break; \
+			case 'L': *( up.q ++ ) = htole64( (U64) SvUV( src ) ); break; \
+			case 'i': *( up.i ++ ) = htole32( (U32) SvIV( src ) ); break; \
+			case 'I': *( up.i ++ ) = htole32( (U32) SvUV( src ) ); break; \
+			case 's': *( up.s ++ ) = htole16( (U16) SvIV( src ) ); break; \
+			case 'S': *( up.s ++ ) = htole16( (U16) SvUV( src ) ); break; \
+			case 'c': *( up.c ++ ) = (U8) SvIV( src ); break;             \
+			case 'C': *( up.c ++ ) = (U8) SvUV( src ); break;             \
+			case 'p': case 'u':                                           \
+				memcpy( up.c, SvPVbyte_nolen(src), sv_len(src)  );        \
+				up.c += sv_len(src);                                      \
+				break;                                                    \
+			default:                                       \
+				croak("Unsupported format: %s",format);    \
+		}                                                  \
+	} STMT_END
+
+#define uptr_field_sv_fmt( up, src, format )                               \
+	STMT_START {                                                           \
+		switch( format ) {                                                 \
+			case 'l': *(up.c++) = 8; *( up.q++ ) = htole64( (U64) SvIV( src ) ); break; \
+			case 'L': *(up.c++) = 8; *( up.q++ ) = htole64( (U64) SvUV( src ) ); break; \
+			case 'i': *(up.c++) = 4; *( up.i++ ) = htole32( (U32) SvIV( src ) ); break; \
+			case 'I': *(up.c++) = 4; *( up.i++ ) = htole32( (U32) SvUV( src ) ); break; \
+			case 's': *(up.c++) = 2; *( up.s++ ) = htole16( (U16) SvIV( src ) ); break; \
+			case 'S': *(up.c++) = 2; *( up.s++ ) = htole16( (U16) SvUV( src ) ); break; \
+			case 'c': *(up.c++) = 1; *( up.c++ ) = (U8) SvIV( src ); break;             \
+			case 'C': *(up.c++) = 1; *( up.c++ ) = (U8) SvUV( src ); break;             \
+			case 'p': case 'u':                                           \
+				up.c = varint( up.c, sv_len(src) );                        \
+				memcpy( up.c, SvPVbyte_nolen(src), sv_len(src)  );         \
+				up.c += sv_len(src);                                       \
+				break;                                                    \
+			default:                                       \
+				croak("Unsupported format: %s",format);    \
+		}                                                  \
+	} STMT_END
+
+
+static inline SV * newSVpvn_pformat ( const char *data, STRLEN size, const unpack_format * format, int idx ) {
+	assert(size >= 0);
+			if (format && idx < format->size) {
+					switch( format->f[ idx ] ) {
+						case 'l':
+							if (size != 8) warn("Field l should be of size 8, but got: %ju", size);
+							return newSViv( le64toh( *( I64 *) data ) );
+							break;
+						case 'L':
+							if (size != 8) warn("Field L should be of size 8, but got: %ju", size);
+							return newSVuv( le64toh( *( U64 *) data ) );
+							break;
+						case 'i':
+							if (size != 4) warn("Field i should be of size 4, but got: %ju", size);
+							return newSViv( le32toh( *( I32 *) data ) );
+							break;
+						case 'I':
+							if (size != 4) warn("Field I should be of size 4, but got: %ju", size);
+							return newSVuv( le32toh( *( U32 *) data ) );
+							break;
+						case 's':
+							if (size != 2) warn("Field s should be of size 2, but got: %ju", size);
+							return newSViv( le16toh( *( I16 *) data ) );
+							break;
+						case 'S':
+							if (size != 2) warn("Field S should be of size 2, but got: %ju", size);
+							return newSVuv( le16toh( *( U16 *) data ) );
+							break;
+						case 'c':
+							if (size != 1) warn("Field c should be of size 1, but got: %ju", size);
+							return newSViv( *( I8 *) data );
+							break;
+						case 'C':
+							if (size != 1) warn("Field C should be of size 1, but got: %ju", size);
+							return newSVuv( *( U8 *) data );
+							break;
+						case 'p':
+							return newSVpvn_utf8(data, size, 0);
+							break;
+						case 'u':
+							return newSVpvn_utf8(data, size, 1);
+							break;
+						default:
+							croak("Unsupported format: %s",format->f[ idx ]);
+					}
+			} else { // no format
+				if (format->def == 'u') {
+					return newSVpvn_utf8(data, size, 1);
+				} else {
+					return newSVpvn_utf8(data, size, 0);
+				}
+			}
+}
+
+/*
+	should return size of the packet captured.
+	return 0 on short read
+	return -1 on fatal error
+*/
+
+static int parse_reply(HV *ret, const char const *data, STRLEN size, const unpack_format const * format) {
+	const char *ptr, *beg, *end;
+	
+	//warn("parse data of size %d",size);
+	if ( size < sizeof(tnt_res_t) ) { // ping could have no count, so + 4
+		if ( size >= sizeof(tnt_hdr_t) ) {
+			tnt_hdr_t *hx = (tnt_hdr_t *) data;
+			//warn ("rcv at least hdr: %d/%d", le32toh( hx->type ), le32toh( hx->len ));
+			if ( le32toh( hx->type ) == TNT_OP_PING && le32toh( hx->len ) == 0 ) {
+				(void) hv_stores(ret, "code", newSViv( 0 ));
+				(void) hv_stores(ret, "status", newSVpvs("ok"));
+				(void) hv_stores(ret, "id",   newSViv( le32toh( hx->reqid ) ));
+				(void) hv_stores(ret, "type", newSViv( le32toh( hx->type ) ));
+				return sizeof(tnt_hdr_t);
+			} else {
+				//warn("not a ping<%u> or wrong len<%u>!=0 for size=%u", le32toh( hx->type ), le32toh( hx->len ), size);
+			}
+		}
+		//warn("small header");
+		goto shortread;
+	}
+	
+	beg = data; // save ptr;
+	
+	tnt_res_t *hd = (tnt_res_t *) data;
+	
+	uint32_t type = le32toh( hd->type );
+	uint32_t len  = le32toh( hd->len );
+	uint32_t code = le32toh( hd->code );
+	
+	(void) hv_stores(ret, "type", newSViv( type ));
+	(void) hv_stores(ret, "code", newSViv( code ));
+	(void) hv_stores(ret, "id",   newSViv( le32toh( hd->reqid ) ));
+	
+	if ( size < len + sizeof(tnt_res_t) - 4 ) {
+		//warn("Header ok but wrong len");
+		goto shortread;
+	}
+	
+	data += sizeof(tnt_res_t);
+	end = data + len - 4;
+	
+	
+	//warn ("type = %d, len=%d (size=%d/%d)", type, len, size, size - sizeof( tnt_hdr_t ));
+	switch (type) {
+		case TNT_OP_PING:
+			return data - beg;
+		case TNT_OP_UPDATE:
+		case TNT_OP_INSERT:
+		case TNT_OP_DELETE:
+		case TNT_OP_SELECT:
+		case TNT_OP_CALL:
+			
+			if (code != 0) {
+				//warn("error (%d)", end - data - 1);
+				(void) hv_stores(ret, "status", newSVpvs("error"));
+				(void) hv_stores(ret, "errstr", newSVpvn( data, end > data ? end - data - 1 : 0 ));
+				data = end;
+				break;
+			} else {
+				(void) hv_stores(ret, "status", newSVpvs("ok"));
+			}
+			
+			if ( len == 0 ) {
+				// no tuple data to read.
+				warn("h.len == 0");
+				break;
+			}
+			
+			uint32_t count = le32toh( ( *(uint32_t *) data ) );
+			//warn ("count = %d",count);
+			
+			data += 4;
+			
+			(void) hv_stores(ret, "count", newSViv(count));
+			
+			if (data > end) {
+				warn("data > end");
+				data = end;
+				break;
+			}
+			
+			int i,k;
+			AV *tuples = newAV();
+			if (count < 1024) {
+				av_extend(tuples, count);
+			}
+			
+			(void) hv_stores( ret, "tuples", newRV_noinc( (SV *) tuples ) );
+			
+			for (i=0;i < count;i++) {
+				uint32_t tsize = le32toh( ( *(uint32_t *) data ) ); data += 4;
+				if (data + tsize > end)
+					goto intersection;
+					
+				uint32_t cardinality = le32toh( ( *(uint32_t *) data ) ); data +=4;
+				
+				
+				AV *tuple = newAV();
+				if (cardinality < 1024) {
+					av_extend(tuple, cardinality);
+				}
+				av_push(tuples, newRV_noinc((SV *)tuple));
+				
+				//warn("tuple[%d] with cardinality %d", i,cardinality);
+				ptr = data;
+				data += tsize;
+				size -= tsize;
+				
+				for ( k=0; k < cardinality; k++ ) {
+					unsigned int fsize = 0;
+					do {
+						fsize = ( fsize << 7 ) | ( *ptr & 0x7f );
+					} while ( *ptr++ & 0x80 && ptr < end );
+					
+					if (ptr == end || ptr + fsize > end)
+						goto intersection;
+					
+					av_push( tuple, newSVpvn_pformat( ptr, fsize, format, k ) );
+					ptr += fsize;
+				};
+			}
+			break;
+		default:
+			(void) hv_stores(ret, "status", newSVpvs("type"));
+			(void) hv_stores(ret, "errstr", newSVpvf("Unknown type of operation: 0x%04x", type));
+			return end - beg;
+	}
+	return end - beg;
+	
+	intersection:
+		(void) hv_stores(ret, "status", newSVpvs("intersect"));
+		(void) hv_stores(ret, "errstr", newSVpvs("Nested structure intersect packet boundary"));
+		return end - beg;
+	shortread:
+		(void) hv_stores(ret, "status", newSVpvs("buffer"));
+		(void) hv_stores(ret, "errstr", newSVpvs("Input data too short"));
+		return 0;
+}
+
+
+static inline ptrdiff_t varint_write(char *buf, uint32_t value) {
+	char *begin = buf;
+	if ( value >= (1 << 7) ) {
+		if ( value >= (1 << 14) ) {
+			if ( value >= (1 << 21) ) {
+				if ( value >= (1 << 28) ) {
+					*(buf++) = (value >> 28) | 0x80;
+				}
+				*(buf++) = (value >> 21) | 0x80;
+			}
+			*(buf++) = ((value >> 14) | 0x80);
+		}
+		*(buf++) = ((value >> 7) | 0x80);
+	}
+	*(buf++) = ((value) & 0x7F);
+	return buf - begin;
+}
+
+static inline char * varint(char *buf, uint32_t value) {
+	if ( value >= (1 << 7) ) {
+		if ( value >= (1 << 14) ) {
+			if ( value >= (1 << 21) ) {
+				if ( value >= (1 << 28) ) {
+					*(buf++) = (value >> 28) | 0x80;
+				}
+				*(buf++) = (value >> 21) | 0x80;
+			}
+			*(buf++) = ((value >> 14) | 0x80);
+		}
+		*(buf++) = ((value >> 7) | 0x80);
+	}
+	*(buf++) = ((value) & 0x7F);
+	return buf;
+}
+
+int varint_size(uint32_t value) {
+	if (value < (1 << 7 )) return 1;
+	if (value < (1 << 14)) return 2;
+	if (value < (1 << 21)) return 3;
+	if (value < (1 << 28)) return 4;
+	                       return 5;
+}
+
+
+#define uptr_sv_size( up, svx, need ) \
+	STMT_START {                                                           \
+		if ( up.c - SvPVX(svx) + need < SvLEN(svx) ) {} \
+		else {\
+			STRLEN used = up.c - SvPVX(svx); \
+			up.c = sv_grow(svx, SvLEN(svx) + need ); \
+			up.c += used; \
+		}\
+	} STMT_END
 
 MODULE = Protocol::Tarantool		PACKAGE = Protocol::Tarantool
 PROTOTYPES: ENABLE
@@ -469,27 +492,19 @@ BOOT:
 	newCONSTSUB(stash, "TNT_FLAG_REPLACE", newSViv(TNT_FLAG_REPLACE));
 	newCONSTSUB(stash, "TNT_FLAG_BOX_QUIET", newSViv(TNT_FLAG_BOX_QUIET));
 	newCONSTSUB(stash, "TNT_FLAG_NOT_STORE", newSViv(TNT_FLAG_NOT_STORE));
-	tnt_mem_init(saferealloc);
 
 void * test ()
 	CODE:
+		/*
 		I32  nt = 0x01234567;
 		char be[8] = "\0\001\002\003\004\005\006\007";
 		//warn( "%08x", be32toh( (unsigned int )be ) );
+		*/
 
-SV * ping( req_id )
+SV * ping_fast( req_id )
 	U32 req_id
-
 	PROTOTYPE: $
 	CODE:
-		sv_buffer buf;
-		SV_BUFFER(buf, 12, req_id);
-		RETVAL = buf.sv;
-		
-		tnt_ping( &buf.s );
-		
-		/*
-		// For fun. Portability is more important
 		char x[12] = {
 			0, 0xff, 0, 0,
 			0, 0, 0, 0,
@@ -498,10 +513,23 @@ SV * ping( req_id )
 			( (req_id >> 16) & 0xff ),
 			( (req_id >> 24) & 0xff )
 		};
-		RETVAL = newSVpvn( x,12 );
-		*/
-	OUTPUT:
-		RETVAL
+		ST(0) = sv_2mortal( newSVpvn(x,12) );
+		XSRETURN(1);
+
+SV * ping( req_id )
+	U32 req_id
+	
+	PROTOTYPE: $
+	CODE:
+		union {
+			char      d[12];
+			tnt_hdr_t s;
+		} buf;
+		buf.s.type  = htole32( TNT_OP_PING );
+		buf.s.reqid = htole32( req_id );
+		buf.s.len   = 0;
+		ST(0) = sv_2mortal( newSVpvn(buf.d,12) );
+		XSRETURN(1);
 
 SV * select( req_id, ns, idx, offset, limit, keys, ... )
 	U32 req_id
@@ -510,212 +538,341 @@ SV * select( req_id, ns, idx, offset, limit, keys, ... )
 	U32 offset
 	U32 limit
 	AV *keys
-
+	
 	PROTOTYPE: $$$$$$;$
 	CODE:
-		int i;
-		struct tnt_list list;
-		struct tnt_tuple *r, *rhead = 0;
-		tnt_list_init( &list );
+		register uniptr p;
+		int k,i;
 		
-		unpack_format format;
-		format.f = "";
-		format.size = 0;
-		if (items > 6) {
-			if ( SvOK(ST(6)) && SvPOK(ST(6)) ) {
-				format.f = SvPVbyte(ST(6), format.size);
-				CHECK_PACK_FORMAT( format.f );
-			}
-			else if (!SvOK( ST(6) )) {}
-			else {
-				croak("Usage: select( req_id, ns, idx, offset, limit, keys [ ,format_string ] )");
-			}
+		dUnpackFormat( format );
+		dExtractFormat( format, 6, "select( req_id, ns, idx, offset, limit, keys" );
+		
+		SV *sv = sv_2mortal(newSVpvn("",0));
+		SV **val;
+		
+		tnt_pkt_select_t *h = (tnt_pkt_select_t *)
+			SvGROW( sv, 
+				( ( (
+					sizeof( tnt_pkt_select_t ) +
+					+ 4
+					+ ( av_len(keys)+1 ) * ( 5 + 32 )
+					+ 16
+				) >> 5 ) << 5 ) + 0x20
+			);
+		
+		p.c = (char *)(h+1);
+		
+		for (i = 0; i <= av_len(keys); i++) {
+			SV *t = *av_fetch( keys, i, 0 );
+			if (!SvROK(t) || (SvTYPE(SvRV(t)) != SVt_PVAV)) croak("keys must be ARRAYREF of ARRAYREF");
+			AV *fields = (AV *) SvRV(t);
 			
-		}
-		//warn("select(req=%u, ns=%u, idx=%u, oft=%u, lim=%u, keys=(AV *)%p, fmt=%s)", req_id, ns, idx, offset, limit, keys, format.f);
-
-		if ( ( list.count = av_len ( keys ) + 1 ) ) {
-			list.list = safemalloc(sizeof( struct tnt_list_ptr ) * list.count);
-			rhead = r = safemalloc(sizeof( struct tnt_tuple ) * list.count);
-			//tnt_mem_alloc(
-			//	sizeof( struct tnt_list_ptr ) * list.count
-			//);
+			*( p.i++ ) = htole32( av_len(fields) + 1 );
 			
-			if ( !list.list ) croak("Can't allocate memory");
-			for (i = 0; i < list.count; i++) {
-				SV *t = *av_fetch( keys, i, 0 );
-				if (!SvROK(t) || (SvTYPE(SvRV(t)) != SVt_PVAV)) croak("keys must be ARRAYREF of ARRAYREF");
-				
-				tmake_tuple_pack( r, (AV *)SvRV(t), &format );
-				list.list[i].ptr = r;
-				r++;
+			for (k=0; k <= av_len(fields); k++) {
+				SV *f = *av_fetch( fields, k, 0 );
+				if ( !SvOK(f) || !sv_len(f) ) {
+					*(p.c++) = 0;
+				} else {
+					uptr_sv_size( p, sv, 5 + sv_len(f) );
+					uptr_field_sv_fmt( p, f, k < format.size ? format.f[k] : format.def );
+				}
 			}
 		}
 		
-		sv_buffer buf;
-		SV_BUFFER(buf, 64, req_id); // select header is 32 bytes. give prealloc for at least 64
-		RETVAL = buf.sv;
-		tnt_select( &buf.s, ns, idx, offset, limit, &list );
-		if (list.count) {
-			safefree( list.list );
-			safefree( rhead );
-		}
-		//tnt_list_free( &list );
-
-	OUTPUT:
-		RETVAL
-
+		SvCUR_set( sv, p.c - SvPVX(sv) );
+		
+		h = (tnt_pkt_select_t *) SvPVX( sv ); // for sure
+		
+		h->type   = htole32( TNT_OP_SELECT );
+		h->reqid  = htole32( htole32( req_id ) );
+		h->space  = htole32( htole32( ns ) );
+		h->index  = htole32( htole32( idx ) );
+		h->offset = htole32( htole32( offset ) );
+		h->limit  = htole32( htole32( limit ) );
+		h->count  = htole32( htole32( av_len(keys) + 1 ) );
+		h->len    = htole32( SvCUR(sv) - sizeof( tnt_hdr_t ) );
+		
+		ST(0) = sv;
+		XSRETURN(1);
 
 SV * insert( req_id, ns, flags, tuple, ... )
 	unsigned req_id
 	unsigned ns
 	unsigned flags
 	AV * tuple
-
+	ALIAS:
+		insert = TNT_OP_INSERT
+		delete = TNT_OP_DELETE
 	PROTOTYPE: $$$$;$
 	CODE:
-		unpack_format format; format.f = ""; format.size = 0;
-		if (items > 4 ) {
-			if ( SvPOK( ST(4) ) ) {
-				format.f = SvPVbyte(ST(4), format.size);
-				CHECK_PACK_FORMAT(format.f);
-				//warn("Used format for insert [%lu]: %s", format.size, format.f);
-			}
-			else if (!SvOK( ST(4) )) {}
-			else {
-				croak("Usage: insert( req_id, ns, flags, tuple [, format_string ] )");
+		register uniptr p;
+		int k;
+		
+		dUnpackFormat( format );
+		dExtractFormat( format, 4, "insert( req_id, ns, flags, tuple" );
+		
+		SV *sv = sv_2mortal(newSVpvn("",0));
+		
+		tnt_pkt_insert_t *h = (tnt_pkt_insert_t *)
+			SvGROW( sv, 
+				( ( (
+					sizeof( tnt_pkt_insert_t ) +
+					+ 4
+					+ ( av_len(tuple)+1 ) * ( 5 + 32 )
+					+ 16
+				) >> 5 ) << 5 ) + 0x20
+			);
+		
+		p.c = (char *)(h+1);
+		
+		
+		*(p.i++) = htole32( av_len(tuple) + 1 );
+		
+		for (k=0; k <= av_len(tuple); k++) {
+			SV *f = *av_fetch( tuple, k, 0 );
+			if ( !SvOK(f) || !sv_len(f) ) {
+				*(p.c++) = 0;
+			} else {
+				uptr_sv_size( p, sv, 5 + sv_len(f) );
+				uptr_field_sv_fmt( p, f, k < format.size ? format.f[k] : format.def );
 			}
 		}
 		
-		sv_buffer buf;
-		SV_BUFFER(buf, 64, req_id); // insert header is 24 bytes. give prealloc for at least 64
-		RETVAL = buf.sv;
-		struct tnt_tuple r;
+		SvCUR_set( sv, p.c - SvPVX(sv) );
+		h = (tnt_pkt_insert_t *) SvPVX( sv ); // for sure
+		h->type   = htole32( ix );
+		h->reqid  = htole32( req_id );
+		h->space  = htole32( ns );
+		h->flags  = htole32( flags );
+		h->len    = htole32( SvCUR(sv) - sizeof( tnt_hdr_t ) );
 		
-		//struct tnt_tuple *t = 
-		tmake_tuple_pack( &r, tuple, &format );
-		tnt_insert( &buf.s, ns, flags, &r );
-		//tnt_tuple_free( t );
-		
-	OUTPUT:
-		RETVAL
+		ST(0) = sv;
+		XSRETURN(1);
 
-SV * update( req_id, ns, flags, tuple, operations, ... )
+SV * update( req_id, ns, flags, tuple, ops, ... )
 	unsigned req_id
 	unsigned ns
 	unsigned flags
 	AV *tuple
-	AV *operations
+	AV *ops
 
 	PROTOTYPE: $$$$$;$
 	CODE:
-		unpack_format format; format.f = ""; format.size = 0;
-		if (items > 5 ) {
-			if ( SvPOK( ST(5) ) ) {
-				format.f = SvPVbyte(ST(5), format.size);
-				CHECK_PACK_FORMAT(format.f);
-			}
-			else if (!SvOK( ST(5) )) {}
-			else {
-				croak("Usage: update( req_id, ns, flags, tuple, operations [, format_string ] )");
-			}
-		}
+		/*
+			packet size:
+			hdr: 20 = sizeof( tnt_pkt_update_t )
+			tuple: 4
+				+ ??? : tuple_size * 16 / variable part
+			opcount: 4
+				+ ??? : opcount * ( 4 + 1 + 1-5=5 + ?=16 )
+				+ ??? : opcount * ( 10 + ?=16 )
+			
+		*/
 		
-		sv_buffer buf;
-		SV_BUFFER(buf, 64, req_id); // update header is 24 bytes. give prealloc for at least 64
-		RETVAL = buf.sv;
+		register int k;
+		register uniptr p;
 		
-		sv_buffer ops;
-		SV_BUFFER(ops, 64, 0); // preallocate some
-		sv_2mortal(ops.sv);
+		dUnpackFormat( format );
+		dExtractFormat( format, 5, "update( req_id, ns, flags, tuple, operations" );
 		
-		struct tnt_tuple r;
-		tmake_tuple_pack( &r, tuple, &format );
-		oplist( &ops.s, operations );
-		ops.b.data = SvPV( ops.sv, ops.b.size );
+		SV *sv = sv_2mortal(newSVpvn("",0));
+		SV **val;
+		AV *aop;
 		
-		tnt_update( &buf.s, ns, flags, &r, &ops.s );
+		tnt_pkt_update_t *h = (tnt_pkt_update_t *)
+			SvGROW( sv, 
+				( ( (
+					sizeof( tnt_pkt_update_t ) +
+					+ 4
+					+ ( av_len(tuple)+1 ) * ( 5 + 32 )
+					+ 4
+					+ ( av_len(ops)+1 ) * ( 4 + 1 + 5 + 32 )
+					+ 128
+				) >> 5 ) << 5 ) + 0x20
+			);
 		
-		//tnt_tuple_free( t );
-		//tnt_stream_free( ops );
+		p.c = (char *)(h+1);
 		
-	OUTPUT:
-		RETVAL
-
-SV * delete( req_id, ns, flags, tuple, ... )
-	unsigned req_id
-	unsigned ns
-	unsigned flags
-	AV *tuple
-
-	PROTOTYPE: $$$$;$
-	CODE:
-	
-		unpack_format format; format.f = ""; format.size = 0;
+		*( p.i++ ) = htole32( av_len(tuple) + 1 );
 		
-		if (items > 4 ) {
-			if ( SvPOK( ST(4) ) ) {
-				format.f = SvPVbyte(ST(4), format.size);
-				CHECK_PACK_FORMAT(format.f);
-			}
-			else if (!SvOK( ST(4) )) {}
-			else {
-				croak("Usage: delete( req_id, ns, flags, tuple [, format_string ] )");
+		for (k=0; k <= av_len(tuple); k++) {
+			SV *f = *av_fetch( tuple, k, 0 );
+			if ( !SvOK(f) || !sv_len(f) ) {
+				p.c += varint_write( p.c, 0 );
+			} else {
+				uptr_sv_size( p, sv, 5 + sv_len(f) );
+				uptr_field_sv_fmt( p, f, k < format.size ? format.f[k] : format.def );
 			}
 		}
 		
-		sv_buffer buf;
-		SV_BUFFER(buf, 32, req_id); // delete header is 24 bytes. but likely it will contain no data except key. give prealloc for 32 (will be enough for one int64)
-		RETVAL = buf.sv;
+		*( p.i++ ) = htole32( av_len(ops) + 1 );
 		
-		struct tnt_tuple r;
-		tmake_tuple_pack( &r, tuple,&format );
-		tnt_delete( &buf.s, ns, flags, &r );
-		//tnt_tuple_free( t );
-	OUTPUT:
-		RETVAL
+		for (k = 0; k <= av_len( ops ); k++) {
+			val = av_fetch( ops, k, 0 );
+			if (!*val || !SvROK( *val ) || SvTYPE( SvRV(*val) ) != SVt_PVAV )
+				croak("Wrong update operation format: %s", val ? SvPV_nolen(*val) : "undef");
+			aop = (AV *)SvRV(*val);
+			
+			if ( av_len( aop ) < 1 ) croak("Too short operation argument list");
+			
+			*( p.i++ ) = htole32( SvUV( *av_fetch( aop, 0, 0 ) ) );
+			
+			char *opname = SvPV_nolen( *av_fetch( aop, 1, 0 ) );
+			
+			U8     opcode = 0;
+			
+			// Assign and insert allow formats. by default: p
+			// Splice always 'p'
+			// num ops always force format l or i (32 or 64), depending on size
+			
+			switch (*opname) {
+				case '#': //delete
+					*( p.c++ ) = TNT_UPDATE_DELETE;
+					*( p.c++ ) = 0;
+					break;
+				case '=': //set
+					//if ( av_len( aop ) < 2 ) croak("Too short operation argument list for %c. Need 3 or 4, have %d", *opname, av_len( aop ) );
+					*( p.c++ ) =  TNT_UPDATE_ASSIGN;
+					val = av_fetch( aop, 2, 0 );
+					if (val && *val && SvOK(*val)) {
+						uptr_sv_size( p,sv, 5 + sv_len(*val));
+						uptr_field_sv_fmt( p, *val, av_len(aop) > 2 ? *SvPV_nolen( *av_fetch( aop, 3, 0 ) ) : 'p' );
+					} else {
+						warn("undef in assign");
+						*( p.c++ ) = 0;
+					}
+					break;
+				case '!': // insert
+					//if ( av_len( aop ) < 2 ) croak("Too short operation argument list for %c. Need 3 or 4, have %d", *opname, av_len( aop ) );
+					*( p.c++ ) = TNT_UPDATE_INSERT;
+					val = av_fetch( aop, 2, 0 );
+					if (val && *val && SvOK(*val)) {
+						uptr_sv_size( p,sv, 5 + sv_len(*val));
+						uptr_field_sv_fmt( p, *val, av_len(aop) > 2 ? *SvPV_nolen( *av_fetch( aop, 3, 0 ) ) : 'p' );
+					} else {
+						warn("undef in insert");
+						*( p.c++ ) = 0;
+					}
+					break;
+				case ':': //splice
+					//if ( av_len( aop ) < 4 ) croak("Too short operation argument list for %c. Need 5, have %d", *opname, av_len( aop ) );
+					
+					*( p.c++ ) = TNT_UPDATE_SPLICE;
+					
+					val = av_fetch( aop, 4, 0 );
+					
+					uptr_sv_size( p,sv, 15 + sv_len(*val));
+					
+					p.c = varint( p.c, 1+4 + 1+4  + varint_size( sv_len(*val) ) + sv_len(*val) );
+					
+					*(p.c++) = 4;
+					*(p.i++) = (U32)SvIV( *av_fetch( aop, 2, 0 ) );
+					*(p.c++) = 4;
+					*(p.i++) = (U32)SvIV( *av_fetch( aop, 3, 0 ) );
+					
+					uptr_field_sv_fmt( p, *val, 'p' );
+					break;
+				case '+': //add
+					opcode = TNT_UPDATE_ADD;
+					break;
+				case '&': //and
+					opcode = TNT_UPDATE_AND;
+					break;
+				case '|': //or
+					opcode = TNT_UPDATE_OR;
+					break;
+				case '^': //xor
+					opcode = TNT_UPDATE_XOR;
+					break;
+				default:
+					croak("Unknown operation: %c", *opname);
+			}
+			if (opcode) { // Arith ops
+				if ( av_len( aop ) < 2 ) croak("Too short operation argument list for %c", *opname);
+				
+				*( p.c++ ) = opcode;
+				
+				unsigned long long v = SvUV( *av_fetch( aop, 2, 0 ) );
+				if (v > 0xffffffff) {
+					*( p.c++ ) = 8;
+					*( p.q++ ) = (U64) v;
+				} else {
+					*( p.c++ ) = 4;
+					*( p.i++ ) = (U32) v;
+				}
+			}
+		}
+		SvCUR_set( sv, p.c - SvPVX(sv) );
+		
+		h = (tnt_pkt_insert_t *) SvPVX( sv ); // for sure
+		
+		h->type   = htole32( TNT_OP_UPDATE );
+		h->reqid  = htole32( req_id );
+		h->space  = htole32( ns );
+		h->flags  = htole32( flags );
+		h->len    = htole32( SvCUR(sv) - sizeof( tnt_hdr_t ) );
+		
+		ST(0) = sv;
+		XSRETURN(1);
+
 
 SV * lua( req_id, flags, proc, tuple, ... )
 	unsigned req_id
 	unsigned flags
-	char *proc
+	SV *proc
 	AV *tuple
 
-	PROTOTYPE: $$$$;$
+	PROTOTYPE: $$$$;@
 	CODE:
-		unpack_format format; format.f = ""; format.size = 0;
-		if (items > 4 ) {
-			if ( SvPOK( ST(4) ) ) {
-				format.f = SvPVbyte(ST(4), format.size);
-				CHECK_PACK_FORMAT(format.f);
-			}
-			else if (!SvOK( ST(4) )) {}
-			else {
-				croak("Usage: lua( req_id, flags, proc, tuple [, format_string ] )");
+		register uniptr p;
+		dUnpackFormat( format );
+		dExtractFormat( format, 4, "lua( req_id, flags, proc, tuple" );
+		int k;
+		
+		SV *sv = sv_2mortal(newSVpvn("",0));
+		
+		tnt_pkt_call_t *h = (tnt_pkt_call_t *)
+			SvGROW( sv, 
+				( ( (
+					sizeof( tnt_pkt_call_t ) +
+					+ 4
+					+ sv_len(proc)
+					+ ( av_len(tuple)+1 ) * ( 5 + 32 )
+					+ 16
+				) >> 5 ) << 5 ) + 0x20
+			);
+		
+		p.c = (char *)(h+1);
+		
+		uptr_field_sv_fmt( p, proc, 'p' );
+		
+		*(p.i++) = htole32( av_len(tuple) + 1 );
+		
+		for (k=0; k <= av_len(tuple); k++) {
+			SV *f = *av_fetch( tuple, k, 0 );
+			if ( !SvOK(f) || !sv_len(f) ) {
+				*(p.c++) = 0;
+			} else {
+				uptr_sv_size( p, sv, 5 + sv_len(f) );
+				uptr_field_sv_fmt( p, f, k < format.size ? format.f[k] : format.def );
 			}
 		}
-		sv_buffer buf;
-		SV_BUFFER(buf, 64, req_id); // lua header is 20 bytes. give prealloc for 64.
-		RETVAL = buf.sv;
 		
-		struct tnt_tuple r;
-		//warn("call tuple pack");
-		tmake_tuple_pack( &r, tuple, &format );
-		//warn("call tnt_call");
-		tnt_call( &buf.s, flags, proc, &r );
-		//tnt_tuple_free( t );
-	OUTPUT:
-		RETVAL
-
-
+		SvCUR_set( sv, p.c - SvPVX(sv) );
+		h = (tnt_pkt_call_t *) SvPVX( sv ); // for sure
+		h->type   = htole32( TNT_OP_CALL );
+		h->reqid  = htole32( req_id );
+		h->flags  = htole32( flags );
+		h->len    = htole32( SvCUR(sv) - sizeof( tnt_hdr_t ) );
+		
+		ST(0) = sv;
+		XSRETURN(1);
 
 HV * response( response, ... )
 	SV *response
 
 	PROTOTYPE: $;@
-	INIT:
-		RETVAL = newHV();
-		sv_2mortal((SV *)RETVAL);
 	CODE:
 		if ( !SvOK(response) )
 			croak( "response is undefined: %s", SvPV_nolen(response) );
@@ -723,6 +880,7 @@ HV * response( response, ... )
 			switch (SvTYPE( SvRV(response) )) {
 				case SVt_PV:
 				case SVt_PVLV:
+				case SVt_PVMG:
 					response = SvRV(response);
 					break;
 				default:
@@ -733,7 +891,7 @@ HV * response( response, ... )
 		unpack_format format;
 		format.f = "";
 		format.size = 0;
-		char default_string = 'p';
+		format.def = 'p';
 		
 		if (items > 1) {
 			if ( SvPOK(ST(1)) ) {
@@ -757,7 +915,7 @@ HV * response( response, ... )
                                                        croak("Unknown pattern in format: %c", *p);
                                        }
 */
-					if (!allowed_format[ *p++ ])
+					if (!allowed_format[ (unsigned char) *p++ ])\
 						croak("Unknown pattern in format: %c", *p);
 				}
 				//warn("Used format [%lu]: %s", format.size, format.f);
@@ -772,7 +930,7 @@ HV * response( response, ... )
 				STRLEN l;
 				char * p = SvPV( ST(2), l );
 				if (l == 1 && ( *p == 'p' || *p == 'u' )) {
-					default_string=*p;
+					format.def = *p;
 				} else {
 					croak("Bad default_string: %s (%d)", p, l);
 				}
@@ -780,44 +938,14 @@ HV * response( response, ... )
 		}
 		STRLEN size;
 		char *data = SvPV( response, size );
-		struct tnt_reply reply;
 		
-		
-		tnt_reply_init( &reply );
-		size_t offset = 0;
-		int cnt = tnt_reply( &reply, data, size, &offset );
-		
-		if ( cnt != 0 ) {
-			if (cnt < 0) {
-				(void) hv_stores(RETVAL, "status", newSVpvs("fatal"));
-				(void) hv_stores(RETVAL, "errstr", newSVpvs("Can't parse server response"));
-			} else {
-				(void) hv_stores(RETVAL, "status", newSVpvs("buffer"));
-				(void) hv_stores(RETVAL, "errstr", newSVpvs("Input data too short"));
-			}
-			if (reply.code)
-				(void) hv_stores(RETVAL, "code",   newSViv(reply.code));
-			if (reply.reqid)
-				(void) hv_stores(RETVAL, "id",   newSViv(reply.reqid));
-			if (reply.op)
-				(void) hv_stores(RETVAL, "op",   newSViv(reply.op));
-		} else
-		{
-			(void) hv_stores(RETVAL, "code",    newSViv(reply.code));
-			(void) hv_stores(RETVAL, "id",      newSViv(reply.reqid));
-			(void) hv_stores(RETVAL, "op",      newSViv(reply.op));
-			(void) hv_stores(RETVAL, "count",   newSViv(reply.count));
-			if (reply.code) {
-				(void) hv_stores(RETVAL, "status", newSVpvs("error"));
-				(void) hv_stores(RETVAL, "errstr", newSVpv(reply.error,0));
-			} else {
-				(void) hv_stores(RETVAL, "status", newSVpvs("ok"));
-				AV *tuples = extract_tuples( &reply, &format, default_string );
-				(void) hv_stores(RETVAL, "tuples", newRV((SV *)tuples));
-			}
+		HV * hv = newHV();
+		int length = parse_reply( hv, data, size, &format );
+		if (length > 0) {
+			(void) hv_stores(hv, "size", newSVuv(length));
 		}
-		tnt_reply_free( &reply );
-	
-	OUTPUT:
-		RETVAL
-
+		ST(0) = sv_2mortal(newRV_noinc( (SV *) hv ));
+		XSRETURN(1);
+		
+		return;
+		

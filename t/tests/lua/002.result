@@ -1,0 +1,11 @@
+{
+  len => 19,
+  trash => "",
+  proc => "call1",
+  flags => 8,
+  tuple => [
+    "\t\0\0\0:s"
+  ],
+  id => 7,
+  type => 22
+}

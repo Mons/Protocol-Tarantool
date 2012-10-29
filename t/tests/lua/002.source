@@ -1,0 +1,9 @@
+{
+  format => "Ipu",
+  flags => 8,
+  proc => "call1",
+  args => [
+    9
+  ],
+  id => 7
+}

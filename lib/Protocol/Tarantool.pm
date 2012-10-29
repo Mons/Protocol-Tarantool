@@ -28,6 +28,19 @@ our $VERSION = '0.01';
 require XSLoader;
 XSLoader::load('Protocol::Tarantool', $VERSION);
 
+sub select_pp {
+	my ($reqid, $ns, $idx, $off, $lim, $keys, $fmt, $df) = @_;
+	return pack(
+		'V8 (a*)*',
+		TNT_SELECT(), 0, $reqid,
+		$ns, $idx, $off, $lim,
+		0+@$keys,
+		
+		
+		map{ pack('V w/a*', 0+@$_, @$_) } @$keys
+	);
+}
+
 # Preloaded methods go here.
 
 1;
