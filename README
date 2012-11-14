@@ -1,40 +1,41 @@
-Protocol-Tarantool version 0.01
-===============================
+NAME
+    Protocol::Tarantool - Binary protocol of Tarantool/Box database
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+SYNOPSIS
+        use Protocol::Tarantool;
 
-A README file is required for CPAN modules since CPAN extracts the
-README file from a module distribution so that people browsing the
-archive can use it get an idea of the modules uses. It is usually a
-good idea to provide version information here so that people can
-decide whether fixes for the module are worth downloading.
+        my $key1 = [ 'value1','value2' ];
+        my $key2 = [ 'value3','value4' ];
+        my $tuple = [ 1,2'data',3,'moredata'];
 
-INSTALLATION
+        # Pack request packets
+        my $packet = Protocol::Tarantool::select( $req_id, $sp_no, $idx_no, $offset, $limit, [ $key1, $key2 ]);
+        my $packet = Protocol::Tarantool::insert( $req_id, $sm_no, $flags, $tuple);
+        my $packet = Protocol::Tarantool::delete( $req_id, $sm_no, $flags, $tuple);
+        my $packet = Protocol::Tarantool::lua(    $req_id, $flags, $function_name, [ $arg1, $arg2, $arg3 ]);
 
-To install this module type the following:
+        # Unpack response packet
+        # detect total size of packet by first bytes of header (need first 8 bytes). Return -1 if not enough data
+        my $size_of_packet = Protocol::Tarantool::peek_size( \$packet );
 
-   perl Makefile.PL
-   make
-   make test
-   make install
+        my $response = Protocol::Tarantool::response( $packet );
 
-DEPENDENCIES
+  EXPORT
+    None by default.
 
-This module requires these other modules and libraries:
+SEE ALSO
+    AnyEvent::Tarantool - AnyEvent client that uses this protocol
+    DR::Tarantool - Another sync and async implementation
+    MR::Tarantool::Box - First client by Mail.Ru
 
-  blah blah blah
+AUTHOR
+    Mons Anderson <mons@cpan.org>
 
-COPYRIGHT AND LICENCE
+LICENSE
+    This program is free software; you can redistribute it and/or modify it
+    under the terms of either: the GNU General Public License as published
+    by the Free Software Foundation; or the Artistic License.
 
-Put the correct copyright and licence information here.
-
-Copyright (C) 2012 by A. U. Thor
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.16.1 or,
-at your option, any later version of Perl 5 you may have available.
-
+COPYRIGHT
+    Copyright 2012 Mons Anderson, Mail.ru, all rights reserved.
 

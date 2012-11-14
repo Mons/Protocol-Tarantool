@@ -22,7 +22,7 @@ use open qw(:std :utf8);
 use lib qw(lib ../lib);
 use lib qw(blib/lib blib/arch ../blib/lib ../blib/arch);
 
-use Test::More tests    => 151;
+use Test::More tests    => 157;
 use Encode qw(decode encode);
 use Devel::Hexdump 'xd';
 
@@ -184,6 +184,8 @@ for (TNT_INSERT, TNT_UPDATE, TNT_SELECT, TNT_DELETE, TNT_CALL, TNT_PING) {
     my $msg = "test message";
     $data = pack "L$LE L$LE L$LE L$LE Z*",
         $_, 5 + length $msg, $_ + 100, 0x0101, $msg;
+    my $len = Protocol::Tarantool::peek_size( \$data );
+    is $len, length($msg) + 5, 'length ok';
     $res = Protocol::Tarantool::response( $data );
     #diag explain $res;
     isa_ok $res => 'HASH', 'well input ' . $_;

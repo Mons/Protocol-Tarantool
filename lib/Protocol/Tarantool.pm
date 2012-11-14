@@ -49,49 +49,56 @@ __END__
 
 =head1 NAME
 
-Protocol::Tarantool - Perl extension for blah blah blah
+Protocol::Tarantool - Binary protocol of Tarantool/Box database
 
 =head1 SYNOPSIS
 
-  use Protocol::Tarantool;
-  blah blah blah
+    use Protocol::Tarantool;
 
-=head1 DESCRIPTION
+    my $key1 = [ 'value1','value2' ];
+    my $key2 = [ 'value3','value4' ];
+    my $tuple = [ 1,2'data',3,'moredata'];
 
-Stub documentation for Protocol::Tarantool, created by h2xs. It looks like the
-author of the extension was negligent enough to leave the stub
-unedited.
+    # Pack request packets
+    my $packet = Protocol::Tarantool::select( $req_id, $sp_no, $idx_no, $offset, $limit, [ $key1, $key2 ]);
+    my $packet = Protocol::Tarantool::insert( $req_id, $sm_no, $flags, $tuple);
+    my $packet = Protocol::Tarantool::delete( $req_id, $sm_no, $flags, $tuple);
+    my $packet = Protocol::Tarantool::lua(    $req_id, $flags, $function_name, [ $arg1, $arg2, $arg3 ]);
 
-Blah blah blah.
+    # Unpack response packet
+    # detect total size of packet by first bytes of header (need first 8 bytes). Return -1 if not enough data
+    my $size_of_packet = Protocol::Tarantool::peek_size( \$packet );
+
+    my $response = Protocol::Tarantool::response( $packet );
 
 =head2 EXPORT
 
 None by default.
 
-
-
 =head1 SEE ALSO
 
-Mention other useful documentation such as the documentation of
-related modules or operating system documentation (such as man pages
-in UNIX), or any relevant external documentation such as RFCs or
-standards.
+=over 4
 
-If you have a mailing list set up for your module, mention it here.
+=item L<AnyEvent::Tarantool> - AnyEvent client that uses this protocol
 
-If you have a web site set up for your module, mention it here.
+=item L<DR::Tarantool> - Another sync and async implementation
+
+=item L<MR::Tarantool::Box> - First client by Mail.Ru
+
+=back
 
 =head1 AUTHOR
 
-A. U. Thor, E<lt>mons@(none)E<gt>
+Mons Anderson <mons@cpan.org>
 
-=head1 COPYRIGHT AND LICENSE
+=head1 LICENSE
 
-Copyright (C) 2012 by A. U. Thor
+This program is free software; you can redistribute it and/or modify it
+under the terms of either: the GNU General Public License as published
+by the Free Software Foundation; or the Artistic License.
 
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.16.1 or,
-at your option, any later version of Perl 5 you may have available.
+=head1 COPYRIGHT
 
+Copyright 2012 Mons Anderson, Mail.ru, all rights reserved.
 
 =cut

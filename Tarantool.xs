@@ -191,7 +191,7 @@ typedef struct {
 			case 'c': *( up.c ++ ) = (U8) SvIV( src ); break;             \
 			case 'C': *( up.c ++ ) = (U8) SvUV( src ); break;             \
 			case 'p': case 'u':                                           \
-				memcpy( up.c, SvPVbyte_nolen(src), sv_len(src)  );        \
+				memcpy( up.c, SvPV_nolen(src), sv_len(src)  );        \
 				up.c += sv_len(src);                                      \
 				break;                                                    \
 			default:                                       \
@@ -212,7 +212,7 @@ typedef struct {
 			case 'C': *(up.c++) = 1; *( up.c++ ) = (U8) SvUV( src ); break;             \
 			case 'p': case 'u':                                           \
 				up.c = varint( up.c, sv_len(src) );                        \
-				memcpy( up.c, SvPVbyte_nolen(src), sv_len(src)  );         \
+				memcpy( up.c, SvPV_nolen(src), sv_len(src)  );         \
 				up.c += sv_len(src);                                       \
 				break;                                                    \
 			default:                                       \
@@ -493,14 +493,6 @@ BOOT:
 	newCONSTSUB(stash, "TNT_FLAG_BOX_QUIET", newSViv(TNT_FLAG_BOX_QUIET));
 	newCONSTSUB(stash, "TNT_FLAG_NOT_STORE", newSViv(TNT_FLAG_NOT_STORE));
 
-void * test ()
-	CODE:
-		/*
-		I32  nt = 0x01234567;
-		char be[8] = "\0\001\002\003\004\005\006\007";
-		//warn( "%08x", be32toh( (unsigned int )be ) );
-		*/
-
 SV * ping_fast( req_id )
 	U32 req_id
 	PROTOTYPE: $
@@ -513,14 +505,15 @@ SV * ping_fast( req_id )
 			( (req_id >> 16) & 0xff ),
 			( (req_id >> 24) & 0xff )
 		};
-		ST(0) = sv_2mortal( newSVpvn(x,12) );
-		XSRETURN(1);
+		RETVAL = sv_2mortal( newSVpvn(x,12) );
+	OUTPUT:
+		RETVAL
 
-SV * ping( req_id )
+void ping( req_id )
 	U32 req_id
 	
 	PROTOTYPE: $
-	CODE:
+	PPCODE:
 		union {
 			char      d[12];
 			tnt_hdr_t s;
@@ -531,7 +524,7 @@ SV * ping( req_id )
 		ST(0) = sv_2mortal( newSVpvn(buf.d,12) );
 		XSRETURN(1);
 
-SV * select( req_id, ns, idx, offset, limit, keys, ... )
+void select( req_id, ns, idx, offset, limit, keys, ... )
 	U32 req_id
 	U32 ns
 	U32 idx
@@ -540,7 +533,7 @@ SV * select( req_id, ns, idx, offset, limit, keys, ... )
 	AV *keys
 	
 	PROTOTYPE: $$$$$$;$
-	CODE:
+	PPCODE:
 		register uniptr p;
 		int k,i;
 		
@@ -548,7 +541,6 @@ SV * select( req_id, ns, idx, offset, limit, keys, ... )
 		dExtractFormat( format, 6, "select( req_id, ns, idx, offset, limit, keys" );
 		
 		SV *sv = sv_2mortal(newSVpvn("",0));
-		SV **val;
 		
 		tnt_pkt_select_t *h = (tnt_pkt_select_t *)
 			SvGROW( sv, 
@@ -596,7 +588,7 @@ SV * select( req_id, ns, idx, offset, limit, keys, ... )
 		ST(0) = sv;
 		XSRETURN(1);
 
-SV * insert( req_id, ns, flags, tuple, ... )
+void insert( req_id, ns, flags, tuple, ... )
 	unsigned req_id
 	unsigned ns
 	unsigned flags
@@ -605,7 +597,7 @@ SV * insert( req_id, ns, flags, tuple, ... )
 		insert = TNT_OP_INSERT
 		delete = TNT_OP_DELETE
 	PROTOTYPE: $$$$;$
-	CODE:
+	PPCODE:
 		register uniptr p;
 		int k;
 		
@@ -650,7 +642,7 @@ SV * insert( req_id, ns, flags, tuple, ... )
 		ST(0) = sv;
 		XSRETURN(1);
 
-SV * update( req_id, ns, flags, tuple, ops, ... )
+void update( req_id, ns, flags, tuple, ops, ... )
 	unsigned req_id
 	unsigned ns
 	unsigned flags
@@ -658,7 +650,7 @@ SV * update( req_id, ns, flags, tuple, ops, ... )
 	AV *ops
 
 	PROTOTYPE: $$$$$;$
-	CODE:
+	PPCODE:
 		/*
 			packet size:
 			hdr: 20 = sizeof( tnt_pkt_update_t )
@@ -817,14 +809,14 @@ SV * update( req_id, ns, flags, tuple, ops, ... )
 		XSRETURN(1);
 
 
-SV * lua( req_id, flags, proc, tuple, ... )
+void lua( req_id, flags, proc, tuple, ... )
 	unsigned req_id
 	unsigned flags
 	SV *proc
 	AV *tuple
 
 	PROTOTYPE: $$$$;@
-	CODE:
+	PPCODE:
 		register uniptr p;
 		dUnpackFormat( format );
 		dExtractFormat( format, 4, "lua( req_id, flags, proc, tuple" );
@@ -869,11 +861,43 @@ SV * lua( req_id, flags, proc, tuple, ... )
 		ST(0) = sv;
 		XSRETURN(1);
 
-HV * response( response, ... )
+void peek_size ( sv )
+	SV *sv
+	
+	PROTOTYPE: $
+	PPCODE:
+		SV * real;
+		if ( SvROK(sv) ) {
+			switch (SvTYPE( SvRV(sv) )) {
+				case SVt_PV:
+				case SVt_PVLV:
+				case SVt_PVMG:
+					real = SvRV( sv );
+					break;
+				default:
+					croak("Bad argument to peek_size: %s, must be scalarref or scalar", SvPV_nolen(sv));
+			}
+		}
+		else
+		if ( SvPOK( sv ) ) {
+			real = sv;
+		}
+		else {
+			real = 0;
+		}
+		if( !real || sv_len( real ) < 8 ) {
+			ST(0) = sv_2mortal( newSViv(-1) );
+		}
+		else {
+			ST(0) = sv_2mortal( newSVuv( le32toh( *( (U32 *)( SvPV_nolen( real ) + 4 ) ) ) ) );
+		}
+		XSRETURN(1);
+
+void response( response, ... )
 	SV *response
 
 	PROTOTYPE: $;@
-	CODE:
+	PPCODE:
 		if ( !SvOK(response) )
 			croak( "response is undefined: %s", SvPV_nolen(response) );
 		if ( SvROK(response) ) {
@@ -946,6 +970,3 @@ HV * response( response, ... )
 		}
 		ST(0) = sv_2mortal(newRV_noinc( (SV *) hv ));
 		XSRETURN(1);
-		
-		return;
-		
