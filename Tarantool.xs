@@ -2,9 +2,65 @@
 #include "perl.h"
 #include "XSUB.h"
 
+#define NEED_newCONSTSUB
+#define NEED_newRV_noinc
+#define NEED_newSVpvn_flags
+#define NEED_sv_2pv_flags
+#define NEED_sv_2pvbyte
 #include "ppport.h"
 
 #include <string.h>
+
+#include <endian.h>
+#ifndef le64toh
+# include <byteswap.h>
+# if __BYTE_ORDER == __LITTLE_ENDIAN
+
+#ifndef le16toh
+#  define htobe16(x) __bswap_16 (x)
+#  define htole16(x) (x)
+#  define be16toh(x) __bswap_16 (x)
+#  define le16toh(x) (x)
+#endif
+
+#ifndef le32toh
+#  define htobe32(x) __bswap_32 (x)
+#  define htole32(x) (x)
+#  define be32toh(x) __bswap_32 (x)
+#  define le32toh(x) (x)
+#endif
+
+#ifndef le64toh
+#  define htobe64(x) __bswap_64 (x)
+#  define htole64(x) (x)
+#  define be64toh(x) __bswap_64 (x)
+#  define le64toh(x) (x)
+#endif
+
+# else
+
+#ifndef le16toh
+#  define htobe16(x) (x)
+#  define htole16(x) __bswap_16 (x)
+#  define be16toh(x) (x)
+#  define le16toh(x) __bswap_16 (x)
+#endif
+
+#ifndef le32toh
+#  define htobe32(x) (x)
+#  define htole32(x) __bswap_32 (x)
+#  define be32toh(x) (x)
+#  define le32toh(x) __bswap_32 (x)
+#endif
+
+#ifndef le64toh
+#  define htobe64(x) (x)
+#  define htole64(x) __bswap_64 (x)
+#  define be64toh(x) (x)
+#  define le64toh(x) __bswap_64 (x)
+#endif
+# endif
+#endif
 
 #define TNT_OP_INSERT      13
 #define TNT_OP_SELECT      17
@@ -31,13 +87,12 @@ enum {
 };
 
 
-#ifdef HAS_QUAD
 #ifndef I64
-typedef I64TYPE I64;
+typedef int64_t I64;
 #endif
+
 #ifndef U64
-typedef U64TYPE U64;
-#endif
+typedef uint64_t U64;
 #endif
 
 #ifdef HAS_QUAD
@@ -101,6 +156,7 @@ typedef
 	union {
 		char     *c;
 		U32      *i;
+
 		U64      *q;
 		U16      *s;
 	} uniptr;

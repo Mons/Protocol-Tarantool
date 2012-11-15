@@ -1,7 +1,7 @@
+use strict;
 use 5.008008;
+
 use ExtUtils::MakeMaker;
-# See lib/ExtUtils/MakeMaker.pm for details of how to influence
-# the contents of the Makefile that is written.
 
 WriteMakefile(
 	NAME              => 'Protocol::Tarantool',
@@ -11,8 +11,9 @@ WriteMakefile(
 	AUTHOR         => 'Mons Anderson <mons@cpan.org>',
 #    LIBS              => ['-ltarantool'], # e.g., '-lm'
 -e '.git' ? (
-	DEFINE            => '-Wall -O0', # e.g., '-DHAVE_SOMETHING'
+	DEFINE            => '-std=c99 -Wall -Wno-declaration-after-statement -O0 -fno-omit-frame-pointer',
 ) : (
+	DEFINE            => '-std=c99 -Wno-declaration-after-statement -O2 -fomit-frame-pointer',
 ),
 	INC               => '-I.', # e.g., '-I. -I/usr/include/other'
 	# Un-comment this if you add C files to link with later:

@@ -1,14 +1,17 @@
 #!/usr/bin/perl
 
 use lib '..';
+use strict;
 use t::mytest tests => 108;
 use Protocol::Tarantool ();
-use uni::perl ':xd';
-
-use String::Diff;
+BEGIN{
+	my $ok = eval { require String::Diff; 1 };
+	*HAVE_STRING_DIFF = sub () { $ok };
+};
 
 sub bcmp {
 	my ($x,$y) = @_;
+	HAVE_STRING_DIFF or return;
 	my $hx = unpack 'H*', $x;
 	my $hy = unpack 'H*', $y;
 	my $diff = String::Diff::diff(

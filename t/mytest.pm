@@ -35,6 +35,7 @@ sub import {
 	no strict 'refs';
 	*{ caller().'::parse_packet' } = \&parse_packet;
 	*{ caller().'::packet_dump' } = \&packet_dump;
+	*{ caller().'::xd' } = \&xd;
 	}
 
 	splice @_, 0, 1, 'Test::More';
@@ -264,6 +265,24 @@ sub packet_dump {
 	}
 	$pk{trash} = $raw;
 	return \%pk;
+}
+
+sub xd ($;$) {
+	if( eval{ require Devel::Hexdump; 1 }) {
+		no strict 'refs';
+		*{ caller().'::xd' } = \&Devel::Hexdump::xd;
+	} else {
+		no strict 'refs';
+		*{ caller().'::xd' } = sub($;$) {
+			my @a = unpack '(H2)*', $_[0];
+			my $s = '';
+			for (0..$#a/16) {
+				$s .= "@a[ $_*16 .. $_*16 + 7 ]  @a[ $_*16+8 .. $_*16 + 15 ]\n";
+			}
+			return $s;
+		};
+	}
+	goto &{ caller().'::xd' };
 }
 
 
