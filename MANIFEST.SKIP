@@ -20,6 +20,7 @@
 \#$
 \b\.#
 \.bak$
+\.(o|c|bs)$
 
 # Avoid Devel::Cover files.
 \bcover_db\b

@@ -133,9 +133,4 @@ t/tests/update/003.source
 t/tests/update/004.binary
 t/tests/update/004.result
 t/tests/update/004.source
-Tarantool.bs
-Tarantool.c
-Tarantool.o
 Tarantool.xs
-test
-test.c
