@@ -228,8 +228,6 @@ sub updates {
 			$format
 		];
 	}
-	use uni::perl ':dumper';
-	warn dumper \@rv;
 	return \@rv;
 }
 

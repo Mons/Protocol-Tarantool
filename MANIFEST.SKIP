@@ -31,3 +31,6 @@
 ^tmp/
 ^Protocol-Tarantool-.*
 ^run.pl
+^t/*.pl
+\.tar\.gz$
+\.tgz$
