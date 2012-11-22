@@ -1,0 +1,5 @@
+libprotocol-tarantool-perl (0.01-1) unstable; urgency=low
+
+  * Initial Release, closes: #693974.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Thu, 22 Nov 2012 17:09:05 +0400
