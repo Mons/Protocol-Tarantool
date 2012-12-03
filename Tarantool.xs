@@ -400,11 +400,20 @@ static int parse_reply(HV *ret, const char const *data, STRLEN size, const unpac
 				(void) hv_stores(ret, "status", newSVpvs("ok"));
 			}
 			
-			if ( len == 0 ) {
-				// no tuple data to read.
-				warn("h.len == 0");
+			if (data == end) {
+				// result without tuples
+				//warn("no more data");
 				break;
 			}
+			/*
+			if ( len == 0 ) {
+				// no tuple data to read.
+				//warn("h.len == 0");
+				break;
+			} else {
+				//warn("have more len: %d", len);
+			}
+			*/
 			
 			uint32_t count = le32toh( ( *(uint32_t *) data ) );
 			//warn ("count = %d",count);
@@ -413,24 +422,35 @@ static int parse_reply(HV *ret, const char const *data, STRLEN size, const unpac
 			
 			(void) hv_stores(ret, "count", newSViv(count));
 			
+			if (data == end) {
+				// result without tuples
+				//warn("no more data");
+				break;
+			} else {
+				//warn("have more data: +%u", end - data);
+			}
+			
 			if (data > end) {
-				warn("data > end");
+				//warn("data > end");
 				data = end;
 				break;
 			}
 			
 			int i,k;
 			AV *tuples = newAV();
+			//warn("count = %d", count);
 			if (count < 1024) {
 				av_extend(tuples, count);
 			}
 			
 			(void) hv_stores( ret, "tuples", newRV_noinc( (SV *) tuples ) );
-			
 			for (i=0;i < count;i++) {
 				uint32_t tsize = le32toh( ( *(uint32_t *) data ) ); data += 4;
-				if (data + tsize > end)
+				//warn("tuple %d size = %u",i,tsize);
+				if (data + tsize > end) {
+					//warn("Intersection: data=%p, size = %u, end = %p", data, tsize, end);
 					goto intersection;
+				}
 					
 				uint32_t cardinality = le32toh( ( *(uint32_t *) data ) ); data +=4;
 				

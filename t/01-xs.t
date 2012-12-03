@@ -22,7 +22,7 @@ use open qw(:std :utf8);
 use lib qw(lib ../lib);
 use lib qw(blib/lib blib/arch ../blib/lib ../blib/arch);
 
-use t::mytest tests    => 157;
+use t::mytest tests    => 164;
 use Encode qw(decode encode);
 
 BEGIN {

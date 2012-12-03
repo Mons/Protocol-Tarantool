@@ -25,6 +25,7 @@ t/test-data/empty_tuple.00022-000-ok.bin
 t/test-data/init.lua
 t/test-data/llc-easy.cfg
 t/test-data/llc-easy2.cfg
+t/test-data/notuple.00013-000-ok.bin
 t/tests/delete/001.binary
 t/tests/delete/001.result
 t/tests/delete/001.source
