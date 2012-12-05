@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+UVERSION    := $(shell grep '^our .VERSION' lib/Protocol/Tarantool.pm \
+    | awk '{print $$4}'|sed "s/[';]//g")
+DVERSION    := $(shell dpkg-parsechangelog \
+    | grep ^Version|awk '{print $$2}'|sed 's/-[[:digit:]]\+$$//')
+PACKAGE	    := $(shell dpkg-parsechangelog |grep ^Source |awk '{print $$2}')
+
+export	USE_PRODUCTION_FLAGS=1
+
+
+tarball: clean
+	test $(UVERSION) = $(DVERSION)
+	cd .. && tar --exclude=debian --exclude=.git \
+	    -czf $(PACKAGE)_$(DVERSION).orig.tar.gz `basename $(CURDIR)`
+        
+
+%:
+	dh $@

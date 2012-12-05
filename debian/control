@@ -1,0 +1,14 @@
+Source: libprotocol-tarantool-perl
+Section: perl
+Priority: optional
+Maintainer: Dmitry E. Oboukhov <unera@debian.org>
+Build-Depends: debhelper (>= 8), perl
+Standards-Version: 3.9.3
+Homepage: http://search.cpan.org/dist/Protocol-Tarantool/
+
+Package: libprotocol-tarantool-perl
+Architecture: any
+Depends: ${misc:Depends}, ${perl:Depends}, ${shlibs:Depends}
+Suggests: tarantool
+Description: Binary protocol of Tarantool/Box database
+ The package provides module to create clients for tarantool database
