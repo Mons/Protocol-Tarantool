@@ -27,8 +27,10 @@
 
 # Avoid local testing/dist files
 
+^debian/
 ^dist/
 ^makeall\.sh$
+^makerpm$
 ^tmp/
 ^Protocol-Tarantool-.*
 ^run.pl

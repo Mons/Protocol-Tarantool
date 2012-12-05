@@ -17,4 +17,12 @@ make dist && \
 cp -f *.tar.gz dist/ && \
 make clean && \
 rm -rf MANIFEST.bak Makefile.old && \
+$perl Makefile.PL && \
+make && \
+./makerpm && \
+make clean && \
+rm -rf MANIFEST.bak Makefile.old && \
+$perl Makefile.PL && \
+cp MYMETA.yml META.yml && \
+cp MYMETA.json META.json && \
 echo "All is OK"
