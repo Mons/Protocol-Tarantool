@@ -1,6 +1,8 @@
 use strict;
 use 5.008008;
 
+$ENV{AUTHOR} and require CPAN::Meta;
+
 use ExtUtils::MakeMaker;
 
 WriteMakefile(

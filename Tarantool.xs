@@ -977,11 +977,23 @@ void response( response, ... )
 		if ( !SvOK(response) )
 			croak( "response is undefined: %s", SvPV_nolen(response) );
 		if ( SvROK(response) ) {
+			switch (SvTYPE( SvRV(response) )) {
+				case SVt_PVAV:
+				case SVt_PVHV:
+				case SVt_PVCV:
+				case SVt_PVFM:
+					croak("Scalar reference required, got %s", SvPV_nolen( response ));
+				default:
+					response = SvRV(response);
+					break;
+			}
+			/*
 			if ( SvOK( SvRV(response) ) ) {
 				response = SvRV(response);
 			} else {
 				croak("Unknown type of reference: Svtype: %d", SvTYPE( SvRV(response) ));
 			}
+			*/
 			/*
 			switch (SvTYPE( SvRV(response) )) {
 				case SVt_PV:
