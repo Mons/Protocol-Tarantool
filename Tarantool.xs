@@ -977,15 +977,24 @@ void response( response, ... )
 		if ( !SvOK(response) )
 			croak( "response is undefined: %s", SvPV_nolen(response) );
 		if ( SvROK(response) ) {
+			if ( SvOK( SvRV(response) ) ) {
+				response = SvRV(response);
+			} else {
+				croak("Unknown type of reference: Svtype: %d", SvTYPE( SvRV(response) ));
+			}
+			/*
 			switch (SvTYPE( SvRV(response) )) {
 				case SVt_PV:
+				case SVt_PVNV: // ???
 				case SVt_PVLV:
 				case SVt_PVMG:
 					response = SvRV(response);
 					break;
 				default:
-					croak("Svtype: %d", SvTYPE( SvRV(response) ));
+					sv_dump( response );
+					croak("Unknown type of reference: Svtype: %d", SvTYPE( SvRV(response) ));
 			}
+			*/
 		}
 			
 		unpack_format format;

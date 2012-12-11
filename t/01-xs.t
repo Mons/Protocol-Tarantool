@@ -22,7 +22,7 @@ use open qw(:std :utf8);
 use lib qw(lib ../lib);
 use lib qw(blib/lib blib/arch ../blib/lib ../blib/arch);
 
-use t::mytest tests    => 164;
+use t::mytest tests    => 168;
 use Encode qw(decode encode);
 
 BEGIN {
@@ -227,4 +227,13 @@ for my $bin (@bins) {
         $ok or diag explain $res;
     }
 }
+
+my $str = pack ("V*", 1,0,2,3);
+my $pkt = \(substr($str,0, 24));
+my $res = Protocol::Tarantool::response( $pkt );
+is $res->{type},  1, "lvalue: type";
+is $res->{id},    2, "lvalue: id";
+is $res->{code},  3, "lvalue: code";
+is $res->{size}, 12, "lvalue: size";
+
 
