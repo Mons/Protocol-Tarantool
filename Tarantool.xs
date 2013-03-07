@@ -282,35 +282,35 @@ static inline SV * newSVpvn_pformat ( const char *data, STRLEN size, const unpac
 			if (format && idx < format->size) {
 					switch( format->f[ idx ] ) {
 						case 'l':
-							if (size != 8) warn("Field l should be of size 8, but got: %ju", size);
+							if (size != 8) warn("Field l should be of size 8, but got: %u", (uint) size);
 							return newSViv( le64toh( *( I64 *) data ) );
 							break;
 						case 'L':
-							if (size != 8) warn("Field L should be of size 8, but got: %ju", size);
+							if (size != 8) warn("Field L should be of size 8, but got: %u", (uint) size);
 							return newSVuv( le64toh( *( U64 *) data ) );
 							break;
 						case 'i':
-							if (size != 4) warn("Field i should be of size 4, but got: %ju", size);
+							if (size != 4) warn("Field i should be of size 4, but got: %u", (uint) size);
 							return newSViv( le32toh( *( I32 *) data ) );
 							break;
 						case 'I':
-							if (size != 4) warn("Field I should be of size 4, but got: %ju", size);
+							if (size != 4) warn("Field I should be of size 4, but got: %u", (uint) size);
 							return newSVuv( le32toh( *( U32 *) data ) );
 							break;
 						case 's':
-							if (size != 2) warn("Field s should be of size 2, but got: %ju", size);
+							if (size != 2) warn("Field s should be of size 2, but got: %u", (uint) size);
 							return newSViv( le16toh( *( I16 *) data ) );
 							break;
 						case 'S':
-							if (size != 2) warn("Field S should be of size 2, but got: %ju", size);
+							if (size != 2) warn("Field S should be of size 2, but got: %u", (uint) size);
 							return newSVuv( le16toh( *( U16 *) data ) );
 							break;
 						case 'c':
-							if (size != 1) warn("Field c should be of size 1, but got: %ju", size);
+							if (size != 1) warn("Field c should be of size 1, but got: %u", (uint) size);
 							return newSViv( *( I8 *) data );
 							break;
 						case 'C':
-							if (size != 1) warn("Field C should be of size 1, but got: %ju", size);
+							if (size != 1) warn("Field C should be of size 1, but got: %u", (uint) size);
 							return newSVuv( *( U8 *) data );
 							break;
 						case 'p':
@@ -568,6 +568,7 @@ BOOT:
 	newCONSTSUB(stash, "TNT_FLAG_REPLACE", newSViv(TNT_FLAG_REPLACE));
 	newCONSTSUB(stash, "TNT_FLAG_BOX_QUIET", newSViv(TNT_FLAG_BOX_QUIET));
 	newCONSTSUB(stash, "TNT_FLAG_NOT_STORE", newSViv(TNT_FLAG_NOT_STORE));
+
 
 SV * ping_fast( req_id )
 	U32 req_id

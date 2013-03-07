@@ -137,3 +137,4 @@ t/tests/update/004.binary
 t/tests/update/004.result
 t/tests/update/004.source
 Tarantool.xs
+test.pl

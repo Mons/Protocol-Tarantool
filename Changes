@@ -1,5 +1,8 @@
 Revision history for Perl extension Protocol::Tarantool.
 
+0.04  Thu 07 Mar 2013
+	- Fix warning
+
 0.03  Thu 11 Dec 2012
 	- Fixing args
 
