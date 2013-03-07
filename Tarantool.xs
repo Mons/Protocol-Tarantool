@@ -448,7 +448,7 @@ static int parse_reply(HV *ret, const char const *data, STRLEN size, const unpac
 				uint32_t tsize = le32toh( ( *(uint32_t *) data ) ); data += 4;
 				//warn("tuple %d size = %u",i,tsize);
 				if (data + tsize > end) {
-					//warn("Intersection: data=%p, size = %u, end = %p", data, tsize, end);
+					warn("Intersection1: data=%p, size = %u, end = %p", data, tsize, end);
 					goto intersection;
 				}
 					
@@ -472,8 +472,10 @@ static int parse_reply(HV *ret, const char const *data, STRLEN size, const unpac
 						fsize = ( fsize << 7 ) | ( *ptr & 0x7f );
 					} while ( *ptr++ & 0x80 && ptr < end );
 					
-					if (ptr == end || ptr + fsize > end)
+					if (ptr + fsize > end) {
+						warn("Intersection2: k=%d < card=%d (fsize: %d) (ptr: %p :: end: %p)", k, cardinality, fsize, ptr, end);
 						goto intersection;
+					}
 					
 					av_push( tuple, newSVpvn_pformat( ptr, fsize, format, k ) );
 					ptr += fsize;
