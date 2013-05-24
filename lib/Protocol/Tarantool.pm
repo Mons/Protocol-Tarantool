@@ -55,9 +55,9 @@ Protocol::Tarantool - Binary protocol of Tarantool/Box database
 
     use Protocol::Tarantool;
 
-    my $key1 = [ 'value1','value2' ];
-    my $key2 = [ 'value3','value4' ];
-    my $tuple = [ 1,2'data',3,'moredata'];
+    my $key1 = [ 'value1', 'value2' ];
+    my $key2 = [ 'value3', 'value4' ];
+    my $tuple = [ 1, 2, 'data', 3, 'moredata'];
 
     # Pack request packets
     my $packet = Protocol::Tarantool::select( $req_id, $sp_no, $idx_no, $offset, $limit, [ $key1, $key2 ]);
