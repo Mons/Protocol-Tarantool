@@ -173,7 +173,7 @@ local $SIG{__WARN__} = sub {};
 ok !eval { Protocol::Tarantool::response( undef ) }, '* parser: undef';
 }
 my $res = Protocol::Tarantool::response( '' );
-diag explain $res;
+eval{ diag explain($res); 1 } or warn "diag failed: $@";
 isa_ok $res => 'HASH', 'empty input';
 like $res->{errstr}, qr{too short}, 'error message';
 is $res->{status}, 'buffer', 'status';
